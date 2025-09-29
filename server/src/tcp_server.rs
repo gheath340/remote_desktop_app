@@ -7,12 +7,17 @@ use std::net::{ TcpListener, TcpStream };
 use std::io;
 use std::error::Error;
 
+fn handel_client(connection: TcpStream) -> Result <(), Box<dyn Error>> {
+    println!("New connection: {:#?}", connection);
+    Ok(())
+}
+
 pub fn run() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("127.0.0.1:7878")?;
     println!("Tcp server listening to port 127.0.0.1:7878");
 
     for stream in listener.incoming() {
-        //handel_client(stream?);
+        handel_client(stream?)?;
     }
     Ok(())
 }
