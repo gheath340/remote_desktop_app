@@ -2,5 +2,7 @@
 use client;
 
 fn main() {
-    client::run();
+    if let Err(e) client::run() {
+        
+    }
 }
