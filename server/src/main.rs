@@ -2,5 +2,8 @@
 use server;
 
 fn main() {
-    server::run();
+    if let Err(e) = server::run() {
+        eprintln!("Application error: {e}");
+        process::exit(1);
+    }
 }

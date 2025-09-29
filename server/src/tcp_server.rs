@@ -6,16 +6,22 @@
 use std::net::{ TcpListener, TcpStream };
 use std::io::{Read, Write};
 use std::error::Error;
+use std::sync::Arc;
+use rustls::{ServerConfig, ServerConnection, Stream};
 
-fn handel_client(mut connection: TcpStream) -> Result <(), Box<dyn Error>> {
-    println!("New connection: {:#?}", connection);
+
+fn handel_client(tcp: TcpStream, tls_config:Arc<ServerConfig>) -> Result <(), Box<dyn Error>> {
+    let mut tls_conn = ServerConnection::new(tls_config.clone())?;
+    let mut tls = Stream::new(&mut tls_conn, tcp);
+
+    println!("New connection: {:#?}", tls);
 
     let mut buffer = [0; 512];
-    let bytes_read = connection.read(&mut buffer)?;
+    let bytes_read = read(&mut tls, &mut buffer)?;
     let message = String::from_utf8_lossy(&buffer[..bytes_read]);
-    println!("Client message: {}", message);
+    println!("TLS secured client message: {}", message);
 
-    connection.write_all(b"hello from server")?;
+    write_all(&mut tls, b"hello from server")?;
     println!("Response sent");
 
     Ok(())
