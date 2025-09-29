@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", features = ["std"] }
 rustls-pemfile = "2"

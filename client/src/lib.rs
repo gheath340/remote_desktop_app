@@ -1,10 +1,11 @@
 //everything that brings code together to be run by main
 use std::process;
-pub mod tcp_server;
+use std::error::Error;
 
-pub fn run() {
-    if let Err(e) = tcp_server::run() {
-        eprintln!("Application error: {e}");
-        process::exit(1);
-    }
+pub mod tcp_server;
+mod client_tls;
+
+pub fn run() -> Result<(), Box<dyn Error>> {
+    let cfg = client_tls::load_client_config()?;
+    tcp_server::run(cfg)
 }
