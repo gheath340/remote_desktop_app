@@ -4,11 +4,20 @@
 //read from and write to socket
 //close connection
 use std::net::{ TcpListener, TcpStream };
-use std::io;
+use std::io::{Read, Write};
 use std::error::Error;
 
-fn handel_client(connection: TcpStream) -> Result <(), Box<dyn Error>> {
+fn handel_client(mut connection: TcpStream) -> Result <(), Box<dyn Error>> {
     println!("New connection: {:#?}", connection);
+
+    let mut buffer = [0; 512];
+    let bytes_read = connection.read(&mut buffer)?;
+    let message = String::from_utf8_lossy(&buffer[..bytes_read]);
+    println!("Client message: {}", message);
+
+    connection.write_all(b"hello from server")?;
+    println!("Response sent");
+
     Ok(())
 }
 
