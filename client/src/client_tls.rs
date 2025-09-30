@@ -6,7 +6,7 @@ use std::error::Error;
 
 pub fn load_client_config() -> Result<Arc<ClientConfig>, Box<dyn Error>> {
     //Read servers cert
-    let mut cert_reader = BufReader::new(File::open("certs/server.crt")?);
+    let mut cert_reader = BufReader::new(File::open("../certs/server.crt")?);
     let certs_vec: Vec<CertificateDer<'static>> = certs(&mut cert_reader)
         .collect::<Result<_,_>>()?;
     //Add server cert into RootCertStore
