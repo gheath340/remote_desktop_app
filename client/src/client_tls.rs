@@ -1,11 +1,11 @@
-use std::{fs::File, io::{BufReader, Read, Write}, net::TcpStream, sync::Arc};
-use rustls::{ClientConfig, ClientConnection, Stream};
+use std::{fs::File, io::{BufReader}, sync::Arc};
+use rustls::{ClientConfig};
 use rustls_pemfile::certs;
-use rustls::pki_types::{CertificateDer, ServerName};
+use rustls::pki_types::{CertificateDer};
 use std::error::Error;
 
 pub fn load_client_config() -> Result<Arc<ClientConfig>, Box<dyn Error>> {
-    //Read servers cert
+    //Read servers certs and puts them into a vec 
     let mut cert_reader = BufReader::new(File::open("../certs/server.crt")?);
     let certs_vec: Vec<CertificateDer<'static>> = certs(&mut cert_reader)
         .collect::<Result<_,_>>()?;
