@@ -9,6 +9,7 @@ use std::error::Error;
 use std::sync::Arc;
 use rustls::{ ServerConfig, ServerConnection, Stream };
 use common::message_type::MessageType;
+use message_type_handlers;
 
 
 fn handel_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(), Box<dyn Error>> {
@@ -17,15 +18,14 @@ fn handel_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(
     let mut tls = Stream::new(&mut tls_conn, &mut tcp);
 
     println!("New connection: {:#?}", tls);
-    // //read message from client
-    // let mut buffer = [0; 512];
-    // let bytes_read = tls.read(&mut buffer)?;
-    // let message = String::from_utf8_lossy(&buffer[..bytes_read]);
-    // println!("TLS secured client message: {}", message);
-    // //send response to client
-    // tls.write_all(b"hello from server")?;
-    // println!("Response sent");
+
+    //read message from client
     dispatcher(&mut tls)?;
+    
+    //send response to client
+    // let payload = b"Hello, server";
+    // send_response(&mut tls, MessageType::Text, payload)?;
+    // println!("Response sent!");
 
     Ok(())
 }
@@ -64,25 +64,25 @@ fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
 
         //dispatch payload to correct handler
         match msg_type {
-            MessageType::Text => handle_text(&payload),
-            MessageType::Connect => handle_connect(&payload),
-            MessageType::Disconnect => handle_disconnect(&payload),
-            MessageType::Error => handle_error(&payload),
+            MessageType::Text => message_type_handlers::handle_text(&payload),
+            MessageType::Connect => message_type_handlers::handle_connect(&payload),
+            MessageType::Disconnect => message_type_handlers::handle_disconnect(&payload),
+            MessageType::Error => message_type_handlers::handle_error(&payload),
 
-            MessageType::FrameFull => handle_frame_full(&payload),
-            MessageType::FrameDelta => handle_frame_delta(&payload),
-            MessageType::CursorShape => handle_cursor_shape(&payload),
-            MessageType::CursorPos => handle_cursor_pos(&payload),
-            MessageType::Resize => handle_resize(&payload),
+            MessageType::FrameFull => message_type_handlers::handle_frame_full(&payload),
+            MessageType::FrameDelta => message_type_handlers::handle_frame_delta(&payload),
+            MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload),
+            MessageType::CursorPos => message_type_handlers::handle_cursor_pos(&payload),
+            MessageType::Resize => message_type_handlers::handle_resize(&payload),
 
-            MessageType::KeyDown => handle_key_down(&payload),
-            MessageType::KeyUp => handle_key_up(&payload),
-            MessageType::MouseMove => handle_mouse_move(&payload),
-            MessageType::MouseDown => handle_mouse_down(&payload),
-            MessageType::MouseUp => handle_mouse_up(&payload),
-            MessageType::MouseScroll => handle_mouse_scroll(&payload),
+            MessageType::KeyDown => message_type_handlers::handle_key_down(&payload),
+            MessageType::KeyUp => message_type_handlers::handle_key_up(&payload),
+            MessageType::MouseMove => message_type_handlers::handle_mouse_move(&payload),
+            MessageType::MouseDown => message_type_handlers::handle_mouse_down(&payload),
+            MessageType::MouseUp => message_type_handlers::handle_mouse_up(&payload),
+            MessageType::MouseScroll => message_type_handlers::handle_mouse_scroll(&payload),
 
-            MessageType::Clipboard => handle_clipboard(&payload),
+            MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload),
 
 
             MessageType::Unknown(code) => {
@@ -91,80 +91,4 @@ fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
-}
-
-fn handle_text(payload: &[u8]) {
-    println!("Text message: {:?}", String::from_utf8_lossy(payload));
-}
-
-fn handle_connect(_payload: &[u8]) {
-    println!("Client connected (connect message)");
-}
-
-fn handle_disconnect(_payload: &[u8]) {
-    println!("Client requested disconnect");
-}
-
-fn handle_error(payload: &[u8]) {
-    println!("Error message: {:?}", String::from_utf8_lossy(payload));
-}
-
-fn handle_frame_full(payload: &[u8]) {
-    println!("Full frame received: {} bytes", payload.len());
-}
-
-fn handle_frame_delta(payload: &[u8]) {
-    println!("Frame delta received: {} bytes", payload.len());
-}
-
-fn handle_cursor_shape(payload: &[u8]) {
-    println!("Cursor shape update: {} bytes", payload.len());
-}
-
-fn handle_cursor_pos(payload: &[u8]) {
-    if payload.len() == 8 {
-        let x = u32::from_be_bytes(payload[0..4].try_into().unwrap());
-        let y = u32::from_be_bytes(payload[4..8].try_into().unwrap());
-        println!("Cursor moved to ({x}, {y})");
-    } else {
-        println!("Invalid cursor pos payload");
-    }
-}
-
-fn handle_resize(payload: &[u8]) {
-    if payload.len() == 8 {
-        let w = u32::from_be_bytes(payload[0..4].try_into().unwrap());
-        let h = u32::from_be_bytes(payload[4..8].try_into().unwrap());
-        println!("Resize request: {w}x{h}");
-    } else {
-        println!("Invalid resize payload");
-    }
-}
-
-fn handle_key_down(payload: &[u8]) {
-    println!("Key down: {:?}", payload);
-}
-
-fn handle_key_up(payload: &[u8]) {
-    println!("Key up: {:?}", payload);
-}
-
-fn handle_mouse_move(payload: &[u8]) {
-    println!("Mouse move: {:?}", payload);
-}
-
-fn handle_mouse_down(payload: &[u8]) {
-    println!("Mouse down: {:?}", payload);
-}
-
-fn handle_mouse_up(payload: &[u8]) {
-    println!("Mouse up: {:?}", payload);
-}
-
-fn handle_mouse_scroll(payload: &[u8]) {
-    println!("Mouse scroll: {:?}", payload);
-}
-
-fn handle_clipboard(payload: &[u8]) {
-    println!("Clipboard data: {:?}", String::from_utf8_lossy(payload));
 }
