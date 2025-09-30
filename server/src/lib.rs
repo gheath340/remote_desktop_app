@@ -1,5 +1,4 @@
 //everything that brings code together to be run by main
-use std::process;
 use std::error::Error;
 
 mod tcp_server;

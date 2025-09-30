@@ -4,10 +4,11 @@
 //read from and write to socket
 //close connection
 use std::net::{ TcpListener, TcpStream };
-use std::io::{ Read, Write };
+use std::io::{ Read, Write, ErrorKind };
 use std::error::Error;
 use std::sync::Arc;
 use rustls::{ ServerConfig, ServerConnection, Stream };
+use common::message_type::MessageType;
 
 
 fn handel_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(), Box<dyn Error>> {
@@ -44,7 +45,14 @@ fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
     loop{
         //create header and read data into header
         let mut header = [0u8; 5];
-        tls.read_exact(&mut header)?;
+        if let Err(e) = tls.read_exact(&mut header) {
+            if e.kind() == ErrorKind::UnexpectedEof {
+                println!("Client disconnected");
+                break;
+            } else {
+                return Err(Box::new(e));
+            }
+        }
 
         //parse message type and payload_len from header
         let msg_type = MessageType::from_u8(header[0]);
@@ -52,7 +60,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
 
         //create empty vec that is the appropriate length for payload and fill it wih payload
         let mut payload = vec![0u8; payload_len as usize];
-        tls.read_exact(&mut payload);
+        tls.read_exact(&mut payload)?;
 
         //dispatch payload to correct handler
         match msg_type {
@@ -82,67 +90,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
             }
         }
     }
-}
-
-//enum for all different message types
-#[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum MessageType {
-    // Session
-    Text        = 0x01,
-    Connect     = 0x02,
-    Disconnect  = 0x03,
-    Error       = 0x04,
-
-    // Display / Frames
-    FrameFull   = 0x10,
-    FrameDelta  = 0x11,
-    CursorShape = 0x12,
-    CursorPos   = 0x13,
-    Resize      = 0x14,
-
-    // Input
-    KeyDown     = 0x20,
-    KeyUp       = 0x21,
-    MouseMove   = 0x22,
-    MouseDown   = 0x23,
-    MouseUp     = 0x24,
-    MouseScroll = 0x25,
-
-    // Clipboard
-    Clipboard   = 0x30,
-
-    //Catch all others
-    Unknown(u8),
-}
-
-impl MessageType {
-    //take in u8 and return the correct message type
-    pub fn from_u8(v: u8) -> Self {
-        match v {
-            0x01 => MessageType::Text,
-            0x02 => MessageType::Connect,
-            0x03 => MessageType::Disconnect,
-            0x04 => MessageType::Error,
-
-            0x10 => MessageType::FrameFull,
-            0x11 => MessageType::FrameDelta,
-            0x12 => MessageType::CursorShape,
-            0x13 => MessageType::CursorPos,
-            0x14 => MessageType::Resize,
-
-            0x20 => MessageType::KeyDown,
-            0x21 => MessageType::KeyUp,
-            0x22 => MessageType::MouseMove,
-            0x23 => MessageType::MouseDown,
-            0x24 => MessageType::MouseUp,
-            0x25 => MessageType::MouseScroll,
-
-            0x30 => MessageType::Clipboard,
-
-            other => MessageType::Unknown(other),
-        }
-    }
+    Ok(())
 }
 
 fn handle_text(payload: &[u8]) {
