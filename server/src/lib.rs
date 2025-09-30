@@ -4,7 +4,7 @@ use std::error::Error;
 
 mod tcp_server;
 mod tls;
-
+//load tls config and call tcp_server run
 pub fn run() -> Result<(), Box<dyn Error>> {
     let cfg = tls::load_server_config()?;
     tcp_server::run(cfg)
