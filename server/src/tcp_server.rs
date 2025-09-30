@@ -16,14 +16,15 @@ fn handel_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(
     let mut tls = Stream::new(&mut tls_conn, &mut tcp);
 
     println!("New connection: {:#?}", tls);
-    //read message from client
-    let mut buffer = [0; 512];
-    let bytes_read = tls.read(&mut buffer)?;
-    let message = String::from_utf8_lossy(&buffer[..bytes_read]);
-    println!("TLS secured client message: {}", message);
-    //send response to client
-    tls.write_all(b"hello from server")?;
-    println!("Response sent");
+    // //read message from client
+    // let mut buffer = [0; 512];
+    // let bytes_read = tls.read(&mut buffer)?;
+    // let message = String::from_utf8_lossy(&buffer[..bytes_read]);
+    // println!("TLS secured client message: {}", message);
+    // //send response to client
+    // tls.write_all(b"hello from server")?;
+    // println!("Response sent");
+    dispatcher(&mut tls)?;
 
     Ok(())
 }
@@ -38,17 +39,74 @@ pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
     }
     Ok(())
 }
+//takes info from client and dispatches to correct MessageType handler
+fn dispatcher<T: Read + Write>(tls: &mut T) -> Resul<()Box<dyn Error>> {
+    loop{
+        //create header and read data into header
+        let mut header = [0u8; 5];
+        if let Err(e) = tls.read_exact(&mut header){
+            prinln!("Connection closed or error: {e}");
+            break;
+        }
 
-fn parse_input() {
-    //create header and read data into header
-    let mut header = [0u8; 5];
-    tls.read_exact(&mut header);
-    //parse message type and payload_len from header
-    let msg_type = MessageType::from_u8(header[0]);
-    let payload_len = u32::from_be_bytes(header[1], header[2], header[3], header[4]);
-    //create empty vec that is the appropriate length for payload and fill it wih payload
-    let mut payload = vec![0u8; payload_len as usize];
-    tls.read_exact(&mut payload);
+        //parse message type and payload_len from header
+        let msg_type = MessageType::from_u8(header[0]);
+        let payload_len = u32::from_be_bytes(header[1], header[2], header[3], header[4]);
+
+        //create empty vec that is the appropriate length for payload and fill it wih payload
+        let mut payload = vec![0u8; payload_len as usize];
+        tls.read_exact(&mut payload);
+
+        //dispatch payload to correct handler
+        match msg_type {
+            MessageType::Text => handle_text(&payload),
+            MessageType::FrameFull => handle_frame(&payload),
+            MessageType::CursorPos => handle_cursor_pos(&payload),
+            MessageType::Resize => handle_resize(&payload),
+            MessageType::Clipboard => handle_clipboard(&payload),
+            MessageType::Unknown(code) => {
+                println!("Unknown message type: {code:#X}, skipping {payload_len} bytes");
+            }
+        }
+    }
+}
+//handle MessageType::Text
+fn handle_text(payload: &[u8]) {
+    if let Ok(s) = String::from_utf8(payload.to_vec()) {
+        println!("Text: {s}");
+    }
+}
+
+//handle MessageType::Frame
+fn handle_frame(payload: &[u8]) {
+    println!("Frame received: {} bytes", payload.len());
+}
+
+//handle MessageType::CursorPos
+fn handle_cursor_pos(payload: &[u8]) {
+    if payload.len() == 8 {
+        let x = u32::from_be_bytes(payload[0..4].try_into().unwrap());
+        let y = u32::from_be_bytes(payload[4..8].try_into().unwrap());
+        println!("Cursor moved to: ({x}, {y})");
+    } else {
+        println!("Invalid cursor pos payload");
+    }
+}
+
+//handle MessageType::Resize
+fn handle_resize(payload: &[u8]) {
+    if payload.len() == 8 {
+        let w = u32::from_be_bytes(payload[0..4].try_into().unwrap());
+        let h = u32::from_be_bytes(payload[4..8].try_into().unwrap());
+        println!("Resize request: {w}x{h}");
+    }
+}
+
+//handle MessageType::Clipboard
+fn handle_clipboard(payload: &[u8]) {
+    if let Ok(s) = String::from_utf8(payload.to_vec()) {
+        println!("Clipboard update: {s}");
+    }
 }
 
 //enum for all different message types
