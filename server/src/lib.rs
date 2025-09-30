@@ -1,7 +1,7 @@
 //everything that brings code together to be run by main
 use std::error::Error;
 
-pub mod message_type_handlers;
+mod message_type_handlers;
 mod tcp_server;
 mod tls;
 //load tls config and call tcp_server run
