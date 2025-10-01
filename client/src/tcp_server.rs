@@ -9,6 +9,7 @@ use std::sync::Arc;
 use rustls::{ClientConfig, ClientConnection, Stream};
 use rustls::pki_types::ServerName;
 use common::message_type::MessageType;
+use image;
 
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //temp variable
@@ -23,6 +24,16 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     let mut tls_connection = ClientConnection::new(tls_config, server_name)?;
     let mut tls = Stream::new(&mut tls_connection, &mut tcp);
 
+    //recieve first frame from server
+    let mut header = [0u8; 5];
+    tls.read_exact(&mut header)?;
+    let msg_type = MessageType::from_u8(header[0]);
+    let payload_len = u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
+    let mut payload = vec![0u8; payload_len as usize];
+    tls.read_exact(&mut payload)?;
+
+    client_handle_frame_full(&payload)?;
+
     //send message to server
     let payload = b"Hello, server";
     send_message(&mut tls, MessageType::Text, payload)?;
@@ -30,7 +41,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     tls.conn.send_close_notify();
     tls.flush()?;
 
-     // //read response from server
+    //read response from server
     // let mut buffer = [0; 512];
     // let bytes_read = tls.read(&mut buffer)?;
     // let response = String::from_utf8_lossy(&buffer[..bytes_read]);
@@ -54,6 +65,16 @@ fn send_message<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8])
     //write payload and make sure it goes
     stream.write_all(payload)?;
     stream.flush()?;
+
+    Ok(())
+}
+
+fn client_handle_frame_full(payload: &[u8]) -> Result<(), Box<dyn Error>> {
+    let img = image::load_from_memory(payload)?;
+    println!("Got full frame!");
+
+    img.save("frame.png")?;
+    println!("Successfully saved frame to frame.png");
 
     Ok(())
 }

@@ -7,3 +7,4 @@ edition = "2024"
 rustls = { version = "0.23", features = ["std"] }
 rustls-pemfile = "2"
 common = { path = "../common"}
+image = "0.24"
