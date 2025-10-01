@@ -1,6 +1,7 @@
 //everything that brings code together to be run by main
 use std::error::Error;
 
+mod window_init;
 pub mod tcp_server;
 mod client_tls;
 

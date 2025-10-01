@@ -8,3 +8,5 @@ rustls = { version = "0.23", features = ["std"] }
 rustls-pemfile = "2"
 common = { path = "../common"}
 image = "0.24"
+winit = "0.28"
+pixels = "0.13"

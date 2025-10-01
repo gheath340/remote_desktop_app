@@ -9,7 +9,7 @@ use std::sync::Arc;
 use rustls::{ClientConfig, ClientConnection, Stream};
 use rustls::pki_types::ServerName;
 use common::message_type::MessageType;
-use image;
+use crate::window_init::window_init;
 
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //temp variable
@@ -32,7 +32,9 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     let mut payload = vec![0u8; payload_len as usize];
     tls.read_exact(&mut payload)?;
 
-    client_handle_frame_full(&payload)?;
+    window_init(&payload)?;
+    
+    //client_handle_frame_full(&payload)?;
 
     //send message to server
     let payload = b"Hello, server";
@@ -69,13 +71,18 @@ fn send_message<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8])
     Ok(())
 }
 
-//load frame and save as png in client dir
-fn client_handle_frame_full(payload: &[u8]) -> Result<(), Box<dyn Error>> {
-    let img = image::load_from_memory(payload)?;
-    println!("Got full frame!");
+// //load frame and save as png in client dir
+// pub fn client_handle_frame_full(payload: &[u8], pixels: &mut pixels::Pixels) -> Result<(), Box<dyn Error>> {
+//     // let img = image::load_from_memory(payload)?;
+//     // println!("Got full frame!");
 
-    img.save("frame.png")?;
-    println!("Successfully saved frame to frame.png");
+//     // img.save("frame.png")?;
+//     // println!("Successfully saved frame to frame.png");
 
-    Ok(())
-}
+//     let img = image::load_from_memory(payload)?;
+//     let rgba = img.to_rgba();
+
+//     let frame = pixels
+
+//     Ok(())
+// }
