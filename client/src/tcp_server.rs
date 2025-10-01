@@ -69,6 +69,7 @@ fn send_message<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8])
     Ok(())
 }
 
+//load frame and save as png
 fn client_handle_frame_full(payload: &[u8]) -> Result<(), Box<dyn Error>> {
     let img = image::load_from_memory(payload)?;
     println!("Got full frame!");
