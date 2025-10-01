@@ -5,11 +5,13 @@
 use std::net::TcpStream;
 use std::io::{Write, Read};
 use std::error::Error;
-use std::sync::Arc;
 use rustls::{ClientConfig, ClientConnection, Stream};
 use rustls::pki_types::ServerName;
 use common::message_type::MessageType;
 use crate::window_init::window_init;
+use std::sync::{ Arc, Mutex };
+
+pub type SharedFrame = Arc<Mutex<Option<Vec<u8>>>>;
 
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //temp variable
@@ -32,7 +34,8 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     let mut payload = vec![0u8; payload_len as usize];
     tls.read_exact(&mut payload)?;
 
-    window_init(&payload)?;
+    let shared: SharedFrame = Arc::new(Mutex::new(Some(payload)));
+    window_init(shared)?;
     
     //client_handle_frame_full(&payload)?;
 

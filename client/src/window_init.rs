@@ -5,9 +5,10 @@ use winit::{
 };
 use pixels::{Pixels, SurfaceTexture};
 use std::error::Error;
+use crate::tcp_server;
 
 //initalize viewing window
-pub fn window_init(payload: &[u8]) -> Result<(), Box<dyn Error>> {
+pub fn window_init(shared_frame: tcp_server::SharedFrame) -> Result<(), Box<dyn Error>> {
     //create event loop and window
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
@@ -15,8 +16,8 @@ pub fn window_init(payload: &[u8]) -> Result<(), Box<dyn Error>> {
         .build(&event_loop)?;
 
     //window dimensions
-    let width = 800;
-    let height = 600;
+    let width = 3440;
+    let height = 1440;
 
     //create pixel surface
     let surface_texture = SurfaceTexture::new(width, height, &window);
@@ -29,11 +30,13 @@ pub fn window_init(payload: &[u8]) -> Result<(), Box<dyn Error>> {
         match event {
             //redraw screen
             Event::RedrawRequested(_) => {
-                if let Err(e) = client_handle_frame_full(&payload, &mut pixels) {
-                    eprintln!("Error handling frame: {e}");
+                if let Some(payload) = shared_frame.lock().unwrap().as_ref() {
+                    if let Err(e) = client_handle_frame_full(&payload, &mut pixels) {
+                        eprintln!("Error handling frame: {e}");
+                    }
+                    //pushes to screen
+                    pixels.render().unwrap();
                 }
-                //pushes to screen
-                pixels.render().unwrap();
             }
             //handles closing of window
             Event::WindowEvent { event, .. } => match event {
