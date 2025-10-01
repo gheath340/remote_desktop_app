@@ -1,8 +1,3 @@
-//needs to reserve an ip and port
-//listen for incoming connections on port
-//accept a client connection(OS gives new socket)
-//read from and write to socket
-//close connection
 use std::net::{ TcpListener, TcpStream };
 use std::io::{ Read, Write, ErrorKind };
 use std::error::Error;
@@ -18,6 +13,10 @@ fn handel_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(
     let mut tls = Stream::new(&mut tls_conn, &mut tcp);
 
     println!("New connection: {:#?}", tls);
+
+    //send first frame right on connection
+    message_type_handlers::handle_frame_full(&mut tls)?;
+
 
     //read message from client
     dispatcher(&mut tls)?;
@@ -64,25 +63,25 @@ fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
 
         //dispatch payload to correct handler
         match msg_type {
-            MessageType::Text => message_type_handlers::handle_text(&payload),
-            MessageType::Connect => message_type_handlers::handle_connect(&payload),
-            MessageType::Disconnect => message_type_handlers::handle_disconnect(&payload),
-            MessageType::Error => message_type_handlers::handle_error(&payload),
+            MessageType::Text => message_type_handlers::handle_text(&payload)?,
+            MessageType::Connect => message_type_handlers::handle_connect(&payload)?,
+            MessageType::Disconnect => message_type_handlers::handle_disconnect(&payload)?,
+            MessageType::Error => message_type_handlers::handle_error(&payload)?,
 
-            MessageType::FrameFull => message_type_handlers::handle_frame_full(&payload),
-            MessageType::FrameDelta => message_type_handlers::handle_frame_delta(&payload),
-            MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload),
-            MessageType::CursorPos => message_type_handlers::handle_cursor_pos(&payload),
-            MessageType::Resize => message_type_handlers::handle_resize(&payload),
+            MessageType::FrameFull => message_type_handlers::handle_frame_full(tls)?,
+            MessageType::FrameDelta => message_type_handlers::handle_frame_delta(&payload)?,
+            MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload)?,
+            MessageType::CursorPos => message_type_handlers::handle_cursor_pos(&payload)?,
+            MessageType::Resize => message_type_handlers::handle_resize(&payload)?,
 
-            MessageType::KeyDown => message_type_handlers::handle_key_down(&payload),
-            MessageType::KeyUp => message_type_handlers::handle_key_up(&payload),
-            MessageType::MouseMove => message_type_handlers::handle_mouse_move(&payload),
-            MessageType::MouseDown => message_type_handlers::handle_mouse_down(&payload),
-            MessageType::MouseUp => message_type_handlers::handle_mouse_up(&payload),
-            MessageType::MouseScroll => message_type_handlers::handle_mouse_scroll(&payload),
+            MessageType::KeyDown => message_type_handlers::handle_key_down(&payload)?,
+            MessageType::KeyUp => message_type_handlers::handle_key_up(&payload)?,
+            MessageType::MouseMove => message_type_handlers::handle_mouse_move(&payload)?,
+            MessageType::MouseDown => message_type_handlers::handle_mouse_down(&payload)?,
+            MessageType::MouseUp => message_type_handlers::handle_mouse_up(&payload)?,
+            MessageType::MouseScroll => message_type_handlers::handle_mouse_scroll(&payload)?,
 
-            MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload),
+            MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
 
 
             MessageType::Unknown(code) => {
@@ -90,5 +89,24 @@ fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
             }
         }
     }
+    Ok(())
+}
+
+//sends given message to server
+pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8]) -> Result<(), Box<dyn Error>> {
+    //get the byte value from msg_type
+    let type_byte = msg_type.to_u8();
+
+    //encode the length of payload into bytes
+    let len_bytes = (payload.len() as u32).to_be_bytes();
+
+    //write the header
+    stream.write_all(&[type_byte])?;
+    stream.write_all(&len_bytes)?;
+
+    //write payload and make sure it goes
+    stream.write_all(payload)?;
+    stream.flush()?;
+
     Ok(())
 }
