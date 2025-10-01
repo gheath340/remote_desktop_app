@@ -50,13 +50,21 @@ pub fn handle_frame_full<T: Write>(stream: &mut T) -> Result<(), Box<dyn Error>>
     };
 
     //scrap gives BGRA, image crate needs RGBA, change to RGBA
+    let stride = frame.len() / height;
     let mut rgba = Vec::with_capacity(width * height * 4);
-    for chunk in frame.chunks(4) {
-        let b = chunk[0];
-        let g = chunk[1];
-        let r = chunk[2];
-        let a = 255;
-        rgba.extend_from_slice(&[r, g, b, a]);
+
+    for y in 0..height {
+        let row_start = y * stride;
+        let row_end = row_start + width * 4;
+        let row = &frame[row_start..row_end];
+
+        for chunk in row.chunks(4) {
+            let b = chunk[0];
+            let g = chunk[1];
+            let r = chunk[2];
+            let a = 255;
+            rgba.extend_from_slice(&[r, g, b, a]);
+        }
     }
 
     //put into ImageBuffer(rust image object)
