@@ -3,9 +3,15 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
-use pixels::{Pixels, SurfaceTexture};
+use pixels::{
+    Pixels, 
+    SurfaceTexture,
+};
 use std::error::Error;
-use crate::{ tcp_server, message_type_handlers };
+use crate::{ 
+    tcp_server, 
+    message_type_handlers,
+ };
 
 //initalize viewing window
 pub fn window_init(shared_frame: tcp_server::SharedFrame) -> Result<(), Box<dyn Error>> {

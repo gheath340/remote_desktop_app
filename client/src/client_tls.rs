@@ -1,8 +1,12 @@
-use std::{fs::File, io::{BufReader}, sync::Arc};
-use rustls::{ClientConfig};
+use std::{
+    fs::File, 
+    io::{ BufReader }, 
+    sync::Arc,
+    error::Error,
+};
+use rustls::{ ClientConfig, };
 use rustls_pemfile::certs;
-use rustls::pki_types::{CertificateDer};
-use std::error::Error;
+use rustls::pki_types::{ CertificateDer, };
 
 pub fn load_client_config() -> Result<Arc<ClientConfig>, Box<dyn Error>> {
     //Read servers certs and puts them into a vec 

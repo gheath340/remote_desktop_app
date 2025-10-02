@@ -1,12 +1,22 @@
-use std::net::TcpStream;
-use std::io::{Write, Read};
-use std::error::Error;
-use rustls::{ClientConfig, ClientConnection, Stream};
-use rustls::pki_types::ServerName;
 use common::message_type::MessageType;
-use crate::{ window_init::window_init, message_type_handlers };
-use std::sync::{ Arc, Mutex };
-use std::process;
+use std::{ 
+    process,
+    net::TcpStream,
+    io::{ Write, Read },
+    error::Error,
+    sync::{ Arc, Mutex },
+};
+use rustls::{ 
+    ClientConfig, 
+    ClientConnection, 
+    Stream, 
+    pki_types::ServerName,
+ };
+use crate::{ 
+    window_init::window_init, 
+    message_type_handlers,
+ };
+
 
 pub type SharedFrame = Arc<Mutex<Option<Vec<u8>>>>;
 
