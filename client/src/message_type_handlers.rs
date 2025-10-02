@@ -24,8 +24,21 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
     Ok(())
 }
 
-pub fn handle_frame_full<T: Write>(stream: &mut T) -> Result<(), Box<dyn Error>> {
-    println!("Full frame received: {} bytes", payload.len());
+pub fn handle_frame_full(payload: &[u8], pixels: &mut pixels::Pixels) -> Result<(), Box<dyn Error>> {
+    let img = image::load_from_memory(payload)?;
+    let rgba = img.to_rgba8();
+
+    let extent = pixels.texture().size();
+    let frame = pixels.frame_mut();
+    let win_width = extent.width;
+    let win_height = extent.height;
+
+    if rgba.width() as usize != win_width.try_into().unwrap() || rgba.height() as usize != win_height.try_into().unwrap() {
+        println!("Frame size {} {} does not match window size {} {}", rgba.width(), rgba.height(), win_width, win_height);
+        return Ok(());
+    }
+
+    frame.copy_from_slice(&rgba);
 
     Ok(())
 }

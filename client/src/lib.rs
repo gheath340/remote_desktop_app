@@ -4,6 +4,7 @@ use std::error::Error;
 mod window_init;
 pub mod tcp_server;
 mod client_tls;
+mod message_type_handlers;
 
 //load client tls config and run server
 pub fn run() -> Result<(), Box<dyn Error>> {

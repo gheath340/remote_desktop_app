@@ -5,19 +5,26 @@ use winit::{
 };
 use pixels::{Pixels, SurfaceTexture};
 use std::error::Error;
-use crate::tcp_server;
+use crate::{ tcp_server, message_type_handlers };
 
 //initalize viewing window
 pub fn window_init(shared_frame: tcp_server::SharedFrame) -> Result<(), Box<dyn Error>> {
+    //grab first frame from shared frame
+    let payload = {
+    let guard = shared_frame.lock().unwrap();
+    guard.clone().ok_or("No frame available for window init")?  
+};
+
+    let img = image::load_from_memory(&payload)?;
+    let rgba = img.to_rgba8();
+    let width = rgba.width();
+    let height = rgba.height();
+
     //create event loop and window
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
         .with_title("Remote desktop client")
         .build(&event_loop)?;
-
-    //window dimensions
-    let width = 3440;
-    let height = 1440;
 
     //create pixel surface
     let surface_texture = SurfaceTexture::new(width, height, &window);
@@ -31,7 +38,7 @@ pub fn window_init(shared_frame: tcp_server::SharedFrame) -> Result<(), Box<dyn 
             //redraw screen
             Event::RedrawRequested(_) => {
                 if let Some(payload) = shared_frame.lock().unwrap().as_ref() {
-                    if let Err(e) = client_handle_frame_full(&payload, &mut pixels) {
+                    if let Err(e) = message_type_handlers::handle_frame_full(&payload, &mut pixels) {
                         eprintln!("Error handling frame: {e}");
                     }
                     //pushes to screen
