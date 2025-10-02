@@ -25,6 +25,7 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
 }
 
 pub fn handle_frame_full(payload: &[u8], pixels: &mut pixels::Pixels) -> Result<(), Box<dyn Error>> {
+    //load img and convert to rgba
     let img = image::load_from_memory(payload)?;
     let rgba = img.to_rgba8();
 
@@ -43,8 +44,45 @@ pub fn handle_frame_full(payload: &[u8], pixels: &mut pixels::Pixels) -> Result<
     Ok(())
 }
 
-pub fn handle_frame_delta(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
-    println!("Frame delta received: {} bytes", payload.len());
+pub fn handle_frame_delta(payload: &[u8], pixels: &mut pixels::Pixels) -> Result<(), Box<dyn Error>>  {
+    if payload.len() < 16 {
+        eprintln!("Frame delta too short");
+        return Ok(());
+    }
+
+    //get payload metadata
+    let x = u32::from_be_bytes(payload[0..4].try_into().unwrap()) as usize;
+    let y = u32::from_be_bytes(payload[4..8].try_into().unwrap()) as usize;
+    let w = u32::from_be_bytes(payload[8..12].try_into().unwrap()) as usize;
+    let h = u32::from_be_bytes(payload[12..16].try_into().unwrap()) as usize;
+
+    let expected_len = w * h * 4;
+    if payload.len() < 16 + expected_len {
+        eprintln!("Payload has wrong length");
+        return Ok(());
+    }
+
+    let data = &payload[16..16 + expected_len];
+
+    //get target frame buffer
+    let extent = pixels.texture().size();
+    let frame = pixels.frame_mut();
+    let frame_w = extent.width as usize;
+    let frame_h = extent.height as usize;
+
+    if x + w > frame_w || y + h > frame_h {
+        eprintln!("Frame delta out of bounds: rect {}x{} at ({}, {}) exceeds {}x{}", w, h, x, y, frame_w, frame_h);
+        return Ok(());
+    }
+
+    for row in 0..h {
+        let dest_start = ((y + row) * frame_w + x) * 4;
+        let dest_end = dest_start + (w * 4);
+        let src_start = row * w * 4;
+        let src_end = src_start + (w * 4);
+
+        frame[dest_start..dest_end].copy_from_slice(&data[src_start..src_end]);
+    }
 
     Ok(())
 }

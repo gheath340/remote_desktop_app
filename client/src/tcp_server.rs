@@ -4,7 +4,7 @@ use std::{
     net::TcpStream,
     io::{ Write, Read },
     error::Error,
-    sync::{ Arc, Mutex },
+    sync::{ Arc, Mutex, mpsc },
 };
 use rustls::{ 
     ClientConfig, 
@@ -17,6 +17,15 @@ use crate::{
     message_type_handlers,
  };
 
+ #[derive(Debug)]
+pub enum UserEvent {
+    NewUpdate,
+}
+
+pub enum FrameUpdate {
+    Full(Vec<u8>),
+    Delta(Vev<u8>),
+}
 
 pub type SharedFrame = Arc<Mutex<Option<Vec<u8>>>>;
 
@@ -25,10 +34,18 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     let connection_address = "127.0.0.1:7878";
     
     //create SharedFrame
-    let shared_frame: SharedFrame = Arc::new(Mutex::new(None));
+    // let shared_frame: SharedFrame = Arc::new(Mutex::new(None));
 
-    //shared frame clone for dispatcher thread
-    let sf_clone = shared_frame.clone();
+    // //shared frame clone for dispatcher thread
+    // let sf_clone = shared_frame.clone();
+
+    //create the UI, main thread loop
+    let event_loop = EventLoop::<UserEvent>::with_user_event();
+    //the proxy that allows dispatcher thread to send message to event_loop
+    let proxy = event_loop.create_proxy();
+
+    //create the transmitter and reciever for the mspc channel(message queue) that carries messages of the type FrameUpdate
+    let (channel_transmitter, channel_reciever) = mspc::channel::<FrameUpdate>();
 
     //create thread for dispatcher
     std::thread::spawn(move || {
@@ -55,46 +72,75 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         //create a TLS stream
         let mut tls = Stream::new(&mut tls_connection, &mut tcp);
 
-        if let Err(e) = dispatcher(&mut tls, sf_clone) {
+        if let Err(e) = dispatcher(&mut tls, tx, proxy) {
             eprintln!("Dispatcher error: {e}");
         }
     });
 
-    //wait to call window_init till first frame is in shared_frame
-    loop {
-        if shared_frame.lock().unwrap().is_some() {
-            break;
+    //looping until the channel recieves a full frame update from dispatcher thread
+    let first_full_bytes = loop {
+        match channel_reciever.recv()? {
+            FrameUpdate::Full(bytes) => break bytes,
+            FrameUpdate::Delta(_) => {
+                continue;
+            }
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+
+    //decode first frame and get dimensions
+    let img = image::load_from_memory(&first_full_bytes)?;
+    let rgba = image.to_rgba8();
+    let (width, height) = (rgba.width(), rgba.height());
+
+    let window = WindoBuilder::new()
+        .with_title("Remote desktop client")
+        .build(&event_loop)?;
+
+    let surface_texture = SurfaceTexture::new(width, height, &window);
+    let mut pixels = Pixels::new(width, height, surface_texture)?;
+
+    {
+        message_type_handlers::handle_frame_full(&first_full_bytes, &mut pixels)?;
+        pixels.render().unwrap();
     }
 
-    //initialize window
-    window_init(shared_frame)?;
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
 
-    Ok(())
+        match event {
+            Event::UserEvent(UserEvent::NewUpdate) => {
+                let mut got_any = false;
+                while let Ok(update) = channel_reciever.try_recv() {
+                    got_any = true;
+                    match update {
+                        FrameUpdate::Full(bytes) =>{
+                            if let Err(e) = message_type_handlers::handle_frame_full(&bytes, &mut pixels) {
+                                eprintln!("Frame full error: {e}");
+                            }
+                        }
+                        FrameUpdate::Delta(bytes) => {
+                            if let Err(e) = message_type_handlers::handle_frame_delta(&bytes, &mut pixels) {
+                                eprintln!("Frame delta error: {e}");
+                            }
+                        }
+                    }
+                }
+                if got_any {
+                    if let Err(e) = pixels.render() {
+                        eprintln!("Render error: {e}");
+                    }
+                }
+            }
+        }
+        Event::WindowEvent { event, .. } => match event {
+            WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+            _ => {}
+        },
+        _ => {}
+    });
 }
 
-//sends given message to server
-// fn send_message<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8]) -> Result<(), Box<dyn Error>> {
-//     //get the byte value from msg_type
-//     let type_byte = msg_type.to_u8();
-
-//     //encode the length of payload into bytes
-//     let len_bytes = (payload.len() as u32).to_be_bytes();
-
-//     //write the header
-//     stream.write_all(&[type_byte])?;
-//     stream.write_all(&len_bytes)?;
-
-//     //write payload and make sure it goes
-//     stream.write_all(payload)?;
-//     stream.flush()?;
-
-//     Ok(())
-// }
-
-//takes info from server and dispatches to correct MessageType handler
-fn dispatcher<T: Read + Write>(tls: &mut T, shared_frame: SharedFrame) -> Result<(), Box<dyn Error>> {
+fn dispatcher<T: Read + Write>(tls: &mut T, tx: mspc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>) -> Result<(), Box<dyn Error>> {
     loop{
         //create header and read data into header
         let mut header = [0u8; 5];
@@ -114,7 +160,6 @@ fn dispatcher<T: Read + Write>(tls: &mut T, shared_frame: SharedFrame) -> Result
             MessageType::Connect => message_type_handlers::handle_connect(&payload)?,
             MessageType::Disconnect => message_type_handlers::handle_disconnect(&payload)?,
             MessageType::Error => message_type_handlers::handle_error(&payload)?,
-            //MessageType::FrameFull => handle_frame_full(&payload)?,
             MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload)?,
             MessageType::CursorPos => message_type_handlers::handle_cursor_pos(&payload)?,
             MessageType::Resize => message_type_handlers::handle_resize(&payload)?,
@@ -129,10 +174,14 @@ fn dispatcher<T: Read + Write>(tls: &mut T, shared_frame: SharedFrame) -> Result
             MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
 
             MessageType::FrameFull => {
-                let mut guard = shared_frame.lock().unwrap();
-                *guard = Some(payload);
+                tx.send(FrameUpdate::Full(payload)).ok();
+                let _ = proxy.send_event(UserEvent::NewUpdate);
             },
-            MessageType::FrameDelta => message_type_handlers::handle_frame_delta(&payload)?,
+            MessageType::FrameDelta => {
+                tx.send(FrameUpdate::Delta(payload)).ok();
+                let _ = proxy,send_event(UserEvent::NewUpdate);
+            }
+            //MessageType::FrameDelta => todo!(),
 
             MessageType::Unknown(code) => {
                 println!("Unknown message type: {code:#X}, skipping {payload_len} bytes");
@@ -140,3 +189,70 @@ fn dispatcher<T: Read + Write>(tls: &mut T, shared_frame: SharedFrame) -> Result
         }
     }
 }
+
+//takes info from server and dispatches to correct MessageType handler
+// fn dispatcher<T: Read + Write>(tls: &mut T, shared_frame: SharedFrame) -> Result<(), Box<dyn Error>> {
+//     loop{
+//         //create header and read data into header
+//         let mut header = [0u8; 5];
+//         tls.read_exact(&mut header)?;
+
+//         //parse message type and payload_len from header
+//         let msg_type = MessageType::from_u8(header[0]);
+//         let payload_len = u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
+
+//         //create empty vec that is the appropriate length for payload and fill it wih payload
+//         let mut payload = vec![0u8; payload_len as usize];
+//         tls.read_exact(&mut payload)?;
+
+//         //dispatch payload to correct handler
+//         match msg_type {
+//             MessageType::Text => message_type_handlers::handle_text(&payload)?,
+//             MessageType::Connect => message_type_handlers::handle_connect(&payload)?,
+//             MessageType::Disconnect => message_type_handlers::handle_disconnect(&payload)?,
+//             MessageType::Error => message_type_handlers::handle_error(&payload)?,
+//             MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload)?,
+//             MessageType::CursorPos => message_type_handlers::handle_cursor_pos(&payload)?,
+//             MessageType::Resize => message_type_handlers::handle_resize(&payload)?,
+
+//             MessageType::KeyDown => message_type_handlers::handle_key_down(&payload)?,
+//             MessageType::KeyUp => message_type_handlers::handle_key_up(&payload)?,
+//             MessageType::MouseMove => message_type_handlers::handle_mouse_move(&payload)?,
+//             MessageType::MouseDown => message_type_handlers::handle_mouse_down(&payload)?,
+//             MessageType::MouseUp => message_type_handlers::handle_mouse_up(&payload)?,
+//             MessageType::MouseScroll => message_type_handlers::handle_mouse_scroll(&payload)?,
+
+//             MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
+
+//             MessageType::FrameFull => {
+//                 let mut guard = shared_frame.lock().unwrap();
+//                 *guard = Some(payload);
+//             },
+//             //MessageType::FrameDelta => message_type_handlers::handle_frame_delta(&payload)?,
+//             MessageType::FrameDelta => todo!(),
+
+//             MessageType::Unknown(code) => {
+//                 println!("Unknown message type: {code:#X}, skipping {payload_len} bytes");
+//             }
+//         }
+//     }
+// }
+
+//sends given message to server
+// fn send_message<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8]) -> Result<(), Box<dyn Error>> {
+//     //get the byte value from msg_type
+//     let type_byte = msg_type.to_u8();
+
+//     //encode the length of payload into bytes
+//     let len_bytes = (payload.len() as u32).to_be_bytes();
+
+//     //write the header
+//     stream.write_all(&[type_byte])?;
+//     stream.write_all(&len_bytes)?;
+
+//     //write payload and make sure it goes
+//     stream.write_all(payload)?;
+//     stream.flush()?;
+
+//     Ok(())
+// }
