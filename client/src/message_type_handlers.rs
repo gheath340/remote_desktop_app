@@ -59,14 +59,11 @@ pub fn handle_frame_delta(payload: &[u8], pixels: &mut pixels::Pixels) -> Result
     let y = u32::from_be_bytes(payload[4..8].try_into().unwrap()) as usize;
     let w = u32::from_be_bytes(payload[8..12].try_into().unwrap()) as usize;
     let h = u32::from_be_bytes(payload[12..16].try_into().unwrap()) as usize;
+    let data = &payload[16..];
 
-    let expected_len = w * h * 4;
-    if payload.len() < 16 + expected_len {
-        eprintln!("Payload has wrong length");
-        return Ok(());
+    if data.len() != w * h * 4 {
+        return Err("FrameDelta pixel data length mismatch".into());
     }
-
-    let data = &payload[16..16 + expected_len];
 
     //get target frame buffer
     let extent = pixels.texture().size();
@@ -79,6 +76,7 @@ pub fn handle_frame_delta(payload: &[u8], pixels: &mut pixels::Pixels) -> Result
         return Ok(());
     }
 
+    let stride = frame_w * 4;
     for row in 0..h {
         let dest_start = ((y + row) * frame_w + x) * 4;
         let dest_end = dest_start + (w * 4);

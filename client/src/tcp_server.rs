@@ -18,10 +18,7 @@ use winit::{
     window::WindowBuilder,
  };
 use pixels::{ SurfaceTexture, Pixels };
-use crate::{ 
-    window_init::window_init, 
-    message_type_handlers,
- };
+use crate::{ message_type_handlers, };
 
  #[derive(Debug)]
 pub enum UserEvent {
