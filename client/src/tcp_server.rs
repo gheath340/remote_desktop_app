@@ -12,10 +12,17 @@ use rustls::{
     Stream, 
     pki_types::ServerName,
  };
+use winit::{ 
+    event_loop::{ EventLoopBuilder, ControlFlow, EventLoopProxy },
+    event::{ Event, WindowEvent },
+    window::WindowBuilder,
+ };
+use pixels::{ SurfaceTexture, Pixels };
 use crate::{ 
     window_init::window_init, 
     message_type_handlers,
  };
+
 
  #[derive(Debug)]
 pub enum UserEvent {
@@ -24,7 +31,7 @@ pub enum UserEvent {
 
 pub enum FrameUpdate {
     Full(Vec<u8>),
-    Delta(Vev<u8>),
+    Delta(Vec<u8>),
 }
 
 pub type SharedFrame = Arc<Mutex<Option<Vec<u8>>>>;
@@ -32,20 +39,14 @@ pub type SharedFrame = Arc<Mutex<Option<Vec<u8>>>>;
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //temp connection address
     let connection_address = "127.0.0.1:7878";
-    
-    //create SharedFrame
-    // let shared_frame: SharedFrame = Arc::new(Mutex::new(None));
-
-    // //shared frame clone for dispatcher thread
-    // let sf_clone = shared_frame.clone();
 
     //create the UI, main thread loop
-    let event_loop = EventLoop::<UserEvent>::with_user_event();
+    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     //the proxy that allows dispatcher thread to send message to event_loop
     let proxy = event_loop.create_proxy();
 
-    //create the transmitter and reciever for the mspc channel(message queue) that carries messages of the type FrameUpdate
-    let (channel_transmitter, channel_reciever) = mspc::channel::<FrameUpdate>();
+    //create the transmitter and reciever for the mpsc channel(message queue) that carries messages of the type FrameUpdate
+    let (channel_transmitter, channel_reciever) = mpsc::channel::<FrameUpdate>();
 
     //create thread for dispatcher
     std::thread::spawn(move || {
@@ -72,7 +73,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         //create a TLS stream
         let mut tls = Stream::new(&mut tls_connection, &mut tcp);
 
-        if let Err(e) = dispatcher(&mut tls, tx, proxy) {
+        if let Err(e) = dispatcher(&mut tls, channel_transmitter, proxy) {
             eprintln!("Dispatcher error: {e}");
         }
     });
@@ -89,10 +90,10 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
 
     //decode first frame and get dimensions
     let img = image::load_from_memory(&first_full_bytes)?;
-    let rgba = image.to_rgba8();
+    let rgba = img.to_rgba8();
     let (width, height) = (rgba.width(), rgba.height());
 
-    let window = WindoBuilder::new()
+    let window = WindowBuilder::new()
         .with_title("Remote desktop client")
         .build(&event_loop)?;
 
@@ -113,7 +114,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                 while let Ok(update) = channel_reciever.try_recv() {
                     got_any = true;
                     match update {
-                        FrameUpdate::Full(bytes) =>{
+                        FrameUpdate::Full(bytes) => {
                             if let Err(e) = message_type_handlers::handle_frame_full(&bytes, &mut pixels) {
                                 eprintln!("Frame full error: {e}");
                             }
@@ -131,16 +132,16 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     }
                 }
             }
-        }
-        Event::WindowEvent { event, .. } => match event {
-            WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                _ => {}
+            },
             _ => {}
-        },
-        _ => {}
+        }
     });
 }
 
-fn dispatcher<T: Read + Write>(tls: &mut T, tx: mspc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>) -> Result<(), Box<dyn Error>> {
+fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>) -> Result<(), Box<dyn Error>> {
     loop{
         //create header and read data into header
         let mut header = [0u8; 5];
@@ -174,12 +175,12 @@ fn dispatcher<T: Read + Write>(tls: &mut T, tx: mspc::Sender<FrameUpdate>, proxy
             MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
 
             MessageType::FrameFull => {
-                tx.send(FrameUpdate::Full(payload)).ok();
+                channel_transmitter.send(FrameUpdate::Full(payload)).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
             },
             MessageType::FrameDelta => {
-                tx.send(FrameUpdate::Delta(payload)).ok();
-                let _ = proxy,send_event(UserEvent::NewUpdate);
+                channel_transmitter.send(FrameUpdate::Delta(payload)).ok();
+                let _ = proxy.send_event(UserEvent::NewUpdate);
             }
             //MessageType::FrameDelta => todo!(),
 
