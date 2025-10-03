@@ -88,25 +88,20 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         }
     };
 
-    //decode first frame and get dimensions
-    // let img = image::load_from_memory(&first_full_bytes)?;
-    // let rgba = img.to_rgba8();
-    // let (width, height) = (rgba.width(), rgba.height());
+    //get image dimensions and image data
     let width = u32::from_be_bytes(first_full_bytes[0..4].try_into().unwrap());
     let height = u32::from_be_bytes(first_full_bytes[4..8].try_into().unwrap());
-    let data = &first_full_bytes[8..];
 
-    if data.len() != (width as usize * height as usize * 4) {
-        return Err("First frame pixel data length mismatch".into());
-    }
-
+    //build window
     let window = WindowBuilder::new()
         .with_title("Remote desktop client")
         .build(&event_loop)?;
 
+    //create surface and attatch pixels to it
     let surface_texture = SurfaceTexture::new(width, height, &window);
     let mut pixels = Pixels::new(width, height, surface_texture)?;
 
+    //put image into pixels to display on window
     {
         message_type_handlers::handle_frame_full(&first_full_bytes, &mut pixels)?;
         pixels.render().unwrap();
@@ -197,70 +192,3 @@ fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<Fr
         }
     }
 }
-
-//takes info from server and dispatches to correct MessageType handler
-// fn dispatcher<T: Read + Write>(tls: &mut T, shared_frame: SharedFrame) -> Result<(), Box<dyn Error>> {
-//     loop{
-//         //create header and read data into header
-//         let mut header = [0u8; 5];
-//         tls.read_exact(&mut header)?;
-
-//         //parse message type and payload_len from header
-//         let msg_type = MessageType::from_u8(header[0]);
-//         let payload_len = u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
-
-//         //create empty vec that is the appropriate length for payload and fill it wih payload
-//         let mut payload = vec![0u8; payload_len as usize];
-//         tls.read_exact(&mut payload)?;
-
-//         //dispatch payload to correct handler
-//         match msg_type {
-//             MessageType::Text => message_type_handlers::handle_text(&payload)?,
-//             MessageType::Connect => message_type_handlers::handle_connect(&payload)?,
-//             MessageType::Disconnect => message_type_handlers::handle_disconnect(&payload)?,
-//             MessageType::Error => message_type_handlers::handle_error(&payload)?,
-//             MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload)?,
-//             MessageType::CursorPos => message_type_handlers::handle_cursor_pos(&payload)?,
-//             MessageType::Resize => message_type_handlers::handle_resize(&payload)?,
-
-//             MessageType::KeyDown => message_type_handlers::handle_key_down(&payload)?,
-//             MessageType::KeyUp => message_type_handlers::handle_key_up(&payload)?,
-//             MessageType::MouseMove => message_type_handlers::handle_mouse_move(&payload)?,
-//             MessageType::MouseDown => message_type_handlers::handle_mouse_down(&payload)?,
-//             MessageType::MouseUp => message_type_handlers::handle_mouse_up(&payload)?,
-//             MessageType::MouseScroll => message_type_handlers::handle_mouse_scroll(&payload)?,
-
-//             MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
-
-//             MessageType::FrameFull => {
-//                 let mut guard = shared_frame.lock().unwrap();
-//                 *guard = Some(payload);
-//             },
-//             //MessageType::FrameDelta => message_type_handlers::handle_frame_delta(&payload)?,
-//             MessageType::FrameDelta => todo!(),
-
-//             MessageType::Unknown(code) => {
-//                 println!("Unknown message type: {code:#X}, skipping {payload_len} bytes");
-//             }
-//         }
-//     }
-// }
-
-//sends given message to server
-// fn send_message<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8]) -> Result<(), Box<dyn Error>> {
-//     //get the byte value from msg_type
-//     let type_byte = msg_type.to_u8();
-
-//     //encode the length of payload into bytes
-//     let len_bytes = (payload.len() as u32).to_be_bytes();
-
-//     //write the header
-//     stream.write_all(&[type_byte])?;
-//     stream.write_all(&len_bytes)?;
-
-//     //write payload and make sure it goes
-//     stream.write_all(payload)?;
-//     stream.flush()?;
-
-//     Ok(())
-// }

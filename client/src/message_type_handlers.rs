@@ -25,18 +25,14 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
 }
 
 pub fn handle_frame_full(payload: &[u8], pixels: &mut pixels::Pixels) -> Result<(), Box<dyn Error>> {
-    //load img and convert to rgba
-    // let img = image::load_from_memory(payload)?;
-    // let rgba = img.to_rgba8();
+    //load dimensions and image data from payload
     let width = u32::from_be_bytes(payload[0..4].try_into().unwrap()) as usize;
     let height = u32::from_be_bytes(payload[4..8].try_into().unwrap()) as usize;
     let data = &payload[8..];
    
-
+    //get the window dimensions and frame
     let extent = pixels.texture().size();
     let frame = pixels.frame_mut();
-    // let win_width = extent.width;
-    // let win_height = extent.height;
 
     if width != extent.width as usize || height != extent.height as usize {
         println!("Frame size {} {} does not match window size {} {}", width, height, extent.width, extent.height);
@@ -47,6 +43,7 @@ pub fn handle_frame_full(payload: &[u8], pixels: &mut pixels::Pixels) -> Result<
         return Err("FrameFull pixel data length mismatch".into());
     }
 
+    //add image data to frame to display image
     frame.copy_from_slice(data);
     Ok(())
 }
