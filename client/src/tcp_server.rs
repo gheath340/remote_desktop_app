@@ -23,7 +23,6 @@ use crate::{
     message_type_handlers,
  };
 
-
  #[derive(Debug)]
 pub enum UserEvent {
     NewUpdate,
