@@ -89,9 +89,16 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     };
 
     //decode first frame and get dimensions
-    let img = image::load_from_memory(&first_full_bytes)?;
-    let rgba = img.to_rgba8();
-    let (width, height) = (rgba.width(), rgba.height());
+    // let img = image::load_from_memory(&first_full_bytes)?;
+    // let rgba = img.to_rgba8();
+    // let (width, height) = (rgba.width(), rgba.height());
+    let width = u32::from_be_bytes(first_full_bytes[0..4].try_into().unwrap());
+    let height = u32::from_be_bytes(first_full_bytes[4..8].try_into().unwrap());
+    let data = &first_full_bytes[8..];
+
+    if data.len() != (width as usize * height as usize * 4) {
+        return Err("First frame pixel data length mismatch".into());
+    }
 
     let window = WindowBuilder::new()
         .with_title("Remote desktop client")
