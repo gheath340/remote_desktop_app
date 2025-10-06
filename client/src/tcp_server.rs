@@ -23,14 +23,13 @@ use crate::{ message_type_handlers, };
  #[derive(Debug)]
 pub enum UserEvent {
     NewUpdate,
+    Redraw,
 }
 
 pub enum FrameUpdate {
     Full(Vec<u8>),
     Delta(Vec<u8>),
 }
-
-pub type SharedFrame = Arc<Mutex<Option<Vec<u8>>>>;
 
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //temp connection address
@@ -117,6 +116,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                                 eprintln!("Frame full error: {e}");
                             }
                         }
+                        //I dont want handle_frame_delta to actually change the window, i want it to hold the updates until FrameEnd is called
                         FrameUpdate::Delta(bytes) => {
                             if let Err(e) = message_type_handlers::handle_frame_delta(&bytes, &mut pixels) {
                                 eprintln!("Frame delta error: {e}");
@@ -124,12 +124,18 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                         }
                     }
                 }
-                if got_any {
-                    if let Err(e) = pixels.render() {
-                        eprintln!("Render error: {e}");
-                    }
+            },
+            //call window request redraw for consistency
+            Event::UserEvent(UserEvent::Redraw) => {
+                window.request_redraw();
+            }
+            //window.request_redraw() calls this
+            Event::RedrawRequested(_) => {
+                if let Err(e) = pixels.render() {
+                    eprintln!("Render error: {e}");
                 }
             }
+
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 _ => {}
@@ -180,7 +186,10 @@ fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<Fr
                 channel_transmitter.send(FrameUpdate::Delta(payload)).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
             }
-            //MessageType::FrameDelta => todo!(),
+            MessageType::FrameEnd => {
+                // This is the signal: all deltas applied, now request redraw
+                proxy.send_event(UserEvent::Redraw).ok();
+            }
 
             MessageType::Unknown(code) => {
                 println!("Unknown message type: {code:#X}, skipping {payload_len} bytes");

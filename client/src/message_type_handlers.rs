@@ -54,36 +54,41 @@ pub fn handle_frame_delta(payload: &[u8], pixels: &mut pixels::Pixels) -> Result
         return Ok(());
     }
 
-    //get payload metadata
-    let x = u32::from_be_bytes(payload[0..4].try_into().unwrap()) as usize;
-    let y = u32::from_be_bytes(payload[4..8].try_into().unwrap()) as usize;
-    let w = u32::from_be_bytes(payload[8..12].try_into().unwrap()) as usize;
-    let h = u32::from_be_bytes(payload[12..16].try_into().unwrap()) as usize;
-    let data = &payload[16..];
+    let rect_count = u32::from_be_bytes(payload[0..4].try_into().unwrap()) as usize;
+    let mut offset = 4;
 
-    if data.len() != w * h * 4 {
-        return Err("FrameDelta pixel data length mismatch".into());
-    }
-
-    //get target frame buffer
     let extent = pixels.texture().size();
     let frame = pixels.frame_mut();
-    let frame_w = extent.width as usize;
-    let frame_h = extent.height as usize;
+    let fw = extent.width as usize;
+    let fh = extent.height as usize;
 
-    if x + w > frame_w || y + h > frame_h {
-        eprintln!("Frame delta out of bounds: rect {}x{} at ({}, {}) exceeds {}x{}", w, h, x, y, frame_w, frame_h);
-        return Ok(());
-    }
+    for _ in 0..rect_count {
+        if offset + 16 > payload.len() {
+            return Err("Truncated FrameDelta payload".into());
+        }
 
-    let stride = frame_w * 4;
-    for row in 0..h {
-        let dest_start = ((y + row) * frame_w + x) * 4;
-        let dest_end = dest_start + (w * 4);
-        let src_start = row * w * 4;
-        let src_end = src_start + (w * 4);
+        let x = u32::from_be_bytes(payload[offset..offset+4].try_into().unwrap()) as usize;
+        let y = u32::from_be_bytes(payload[offset+4..offset+8].try_into().unwrap()) as usize;
+        let w = u32::from_be_bytes(payload[offset+8..offset+12].try_into().unwrap()) as usize;
+        let h = u32::from_be_bytes(payload[offset+12..offset+16].try_into().unwrap()) as usize;
+        offset += 16;
 
-        frame[dest_start..dest_end].copy_from_slice(&data[src_start..src_end]);
+        let rect_size = w * h * 4;
+        if offset + rect_size > payload.len() {
+            return Err("Truncated FrameDelta pixel data".into());
+        }
+
+        let data = &payload[offset..offset+rect_size];
+        offset += rect_size;
+
+        let stride = fw * 4;
+        for row in 0..h {
+            let dest_start = ((y + row) * fw + x) * 4;
+            let dest_end = dest_start + w * 4;
+            let src_start = row * w * 4;
+            let src_end = src_start + w * 4;
+            frame[dest_start..dest_end].copy_from_slice(&data[src_start..src_end]);
+        }
     }
 
     Ok(())
