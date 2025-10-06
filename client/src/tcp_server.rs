@@ -19,6 +19,8 @@ use winit::{
  };
 use pixels::{ SurfaceTexture, Pixels };
 use crate::{ message_type_handlers, };
+use lz4_flex::decompress_size_prepended;
+
 
  #[derive(Debug)]
 pub enum UserEvent {
@@ -179,10 +181,12 @@ fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<Fr
             MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
 
             MessageType::FrameFull => {
+                let decompressed = decompress_size_prepended(&payload)?;
                 channel_transmitter.send(FrameUpdate::Full(payload)).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
             },
             MessageType::FrameDelta => {
+                let decompressed = decompress_size_prepended(&payload)?;
                 channel_transmitter.send(FrameUpdate::Delta(payload)).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
             }
