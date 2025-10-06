@@ -1,7 +1,6 @@
 //everything that brings code together to be run by main
 use std::error::Error;
 
-
 mod message_type_handlers;
 mod tcp_server;
 mod tls;

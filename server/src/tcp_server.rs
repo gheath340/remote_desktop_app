@@ -1,13 +1,22 @@
-use std::net::{ TcpListener, TcpStream };
-use std::io::{ Read, Write, ErrorKind };
-use std::error::Error;
-use std::sync::Arc;
-use rustls::{ ServerConfig, ServerConnection, Stream };
+use std::net::{ 
+    TcpListener, 
+    TcpStream, 
+};
+use std::{ 
+    io::{ Read, Write, ErrorKind }, 
+    error::Error, 
+    sync::Arc, 
+};
+use rustls::{ 
+    ServerConfig, 
+    ServerConnection, 
+    Stream, 
+};
 use common::message_type::MessageType;
 use crate::message_type_handlers;
 
 
-fn handel_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(), Box<dyn Error>> {
+fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(), Box<dyn Error>> {
     //create TLS server machine then create TLS stream
     let mut tls_conn = ServerConnection::new(tls_config.clone())?;
     let mut tls = Stream::new(&mut tls_conn, &mut tcp);
@@ -15,16 +24,31 @@ fn handel_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(
     println!("New connection: {:#?}", tls);
 
     //send first frame right on connection
-    message_type_handlers::handle_frame_full(&mut tls)?;
+    //message_type_handlers::handle_frame_full(&mut tls)?;
 
+    let (width, height, rgba) = message_type_handlers::create_capturer_convert_to_rgba()?;
+
+    //send one full frame to start
+    let mut payload = Vec::with_capacity(8 + rgba.len());
+    payload.extend_from_slice(&(width as u32).to_be_bytes());
+    payload.extend_from_slice(&(height as u32).to_be_bytes());
+    payload.extend_from_slice(&rgba);
+    send_response(&mut tls, MessageType::FrameFull, &payload)?;
+
+    //keep previous frame for delta comparison
+    let mut prev_frame = rgba;
+
+    //message_type_handlers::handle_frame_delta(&mut tls)?;
+    loop {
+        if let Err(e) = message_type_handlers::handle_frame_delta(&mut tls, &mut prev_frame, width, height) {
+            eprintln!("Stream error: {e}");
+            break
+        }
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    }
 
     //read message from client
     dispatcher(&mut tls)?;
-    
-    //send response to client
-    // let payload = b"Hello, server";
-    // send_response(&mut tls, MessageType::Text, payload)?;
-    // println!("Response sent!");
 
     Ok(())
 }
@@ -35,7 +59,7 @@ pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
     println!("Tcp server listening to port 127.0.0.1:7878");
     //call handel_client on all clients that contact tcp adress
     for stream in listener.incoming() {
-        handel_client(stream?, tls_config.clone())?;
+        handle_client(stream?, tls_config.clone())?;
     }
     Ok(())
 }
@@ -69,7 +93,9 @@ fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
             MessageType::Error => message_type_handlers::handle_error(&payload)?,
 
             MessageType::FrameFull => message_type_handlers::handle_frame_full(tls)?,
-            MessageType::FrameDelta => message_type_handlers::handle_frame_delta(&payload)?,
+            //MessageType::FrameDelta => message_type_handlers::handle_frame_delta(tls)?,
+            MessageType::FrameDelta => {}
+            MessageType::FrameEnd => {}
             MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload)?,
             MessageType::CursorPos => message_type_handlers::handle_cursor_pos(&payload)?,
             MessageType::Resize => message_type_handlers::handle_resize(&payload)?,
