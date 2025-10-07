@@ -75,12 +75,12 @@ pub mod capture_macos {
             let provider: CGDataProvider = unsafe {
                 CGDataProvider::from_ptr(provider_ptr)
             };
-            let cfdata = unsafe { provider.copy_data() };
+            let cfdata = provider.copy_data();
             let len = unsafe { CFDataGetLength(cfdata.as_concrete_TypeRef()) } as usize;
             let ptr = unsafe { CFDataGetBytePtr(cfdata.as_concrete_TypeRef()) };
             let bytes = unsafe { std::slice::from_raw_parts(ptr, len).to_vec() };
 
-            let stride = len / height;
+            let stride = (len + height - 1) / height;
             let row_bytes = width * 4;
 
             let mut rgba = Vec::with_capacity(width * height * 4);
@@ -91,12 +91,6 @@ pub mod capture_macos {
                     rgba.extend_from_slice(&[chunk[2], chunk[1], chunk[0], chunk[3]]);
                 }
             }
-
-            // ✅ convert BGRA → RGBA
-            // let mut rgba = Vec::with_capacity(width * height * 4);
-            // for chunk in bytes.chunks_exact(4) {
-            //     rgba.extend_from_slice(&[chunk[2], chunk[1], chunk[0], chunk[3]]);
-            // }
 
             Ok((width as u32, height as u32, rgba))
         }

@@ -1,12 +1,10 @@
 use std::{ 
-    io::{ Read, Write, ErrorKind }, 
+    io::{ Write, }, 
     error::Error, 
-    process,
+    time::Instant,
 };
 use crate::tcp_server::send_response;
 use common::message_type::MessageType;
-use image::codecs::png::PngEncoder;
-use image::ImageEncoder;
 use lz4_flex::compress_prepend_size;
 use crate::screen_capture::{ScreenCapturer, ActiveCapturer};
 
@@ -34,57 +32,12 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
     Ok(())
 }
 
-//helper function to get display capturer and rgba image from capturer
-// pub fn create_capturer_convert_to_rgba() -> Result<(usize, usize, Vec<u8>), Box<dyn Error>> {
-//     //get display(main monitor) and capturer(captures display)
-//     let mut capturer = ActiveCapturer::new()?;
-//     let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
-//     let width = width_u32 as usize;
-//     let height = height_u32 as usize;
-
-//     //grab frame, if WouldBlock wait and try again until it works
-//     let frame = loop {
-//         match capturer.frame() {
-//             Ok(frame) => break frame,
-//             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-//                 std::thread::sleep(std::time::Duration::from_millis(5));
-//                 continue;
-//             }
-//             Err(e) => return Err(Box::new(e))
-//         }
-//     };
-
-//     //get the actual width of each line including buffer
-//     let stride = frame.len() / height;
-//     let mut rgba = Vec::with_capacity(width * height * 4);
-
-//     for y in 0..height {
-//         //for each row, start at the beginning of the row
-//         let row_start = y * stride;
-//         //go from start of row to end of expected lenght, ignoring buffer
-//         let row_end = row_start + width * 4;
-//         let row = &frame[row_start..row_end];
-
-//         //for each 4 byte chunk in row get the value
-//         for chunk in row.chunks(4) {
-//             let b = chunk[0];
-//             let g = chunk[1];
-//             let r = chunk[2];
-//             let a = 255;
-//             //reorder them for rgba and add to rgba Vec
-//             rgba.extend_from_slice(&[r, g, b, a]);
-//         }
-//     }
-//     Ok((width, height, rgba))
-// }
-
 pub fn handle_frame_full<T: Write>(stream: &mut T) -> Result<(), Box<dyn Error>> {
     //get image to display and dimensions
-    // let (width, height, rgba) = create_capturer_convert_to_rgba()?;
     let mut capturer = ActiveCapturer::new()?;
     let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
-    let width = width_u32 as usize;
-    let height = height_u32 as usize;
+    let (width, height) = (width_u32 as usize, height_u32 as usize);
+
 
     //add image dimensions and image data to payload
     let mut payload = Vec::with_capacity(8 + rgba.len());
@@ -100,11 +53,12 @@ pub fn handle_frame_full<T: Write>(stream: &mut T) -> Result<(), Box<dyn Error>>
 
 pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, width: usize, height: usize) -> Result<(), Box<dyn Error>> {
     //get screen as rgba
-    //let (_, _, rgba) = create_capturer_convert_to_rgba()?;
+    let start_total = Instant::now();
+
+    let t0 = Instant::now();
     let mut capturer = ActiveCapturer::new()?;
-    let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
-    let width = width_u32 as usize;
-    let height = height_u32 as usize;
+    let (_, _, rgba) = capturer.capture_frame()?;
+    let capture_ms = t0.elapsed().as_millis();
 
     //block size for delta comparison
     let block_size = 128;
@@ -114,6 +68,7 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
 
         //calculate block width and height so edge blocks dont overflow
         //then compare current frame pixles vs previous frame, mark block as changed if different
+        let t1 = Instant::now();
         for by in (0..height).step_by(block_size) {
             for bx in (0..width).step_by(block_size) {
                 let bw = block_size.min(width - bx);
@@ -145,16 +100,24 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
                 }
             }
         }
+        let compare_loop_ms = t1.elapsed().as_millis();
         if rect_count > 0 {
+            let t2 = Instant::now(); 
             let mut payload = Vec::with_capacity(4 + frame_changes.len());
             payload.extend_from_slice(&rect_count.to_be_bytes());
             payload.extend_from_slice(&frame_changes);
 
             let compressed = compress_prepend_size(&payload);
-    
+            let compression_ms = t2.elapsed().as_millis();
+            let t3 = Instant::now();
             send_response(stream, MessageType::FrameDelta, &compressed)?;
+            let delta_response_ms = t3.elapsed().as_millis();
+
+            let total_ms = start_total.elapsed().as_millis();
+            println!("capture: {}ms | compare loop: {}ms | compression: {}ms | send delta: {}ms | total: {}ms", capture_ms, compare_loop_ms, compression_ms, delta_response_ms, total_ms);
         }
         send_response(stream, MessageType::FrameEnd, &[])?;
+
 
         // Save this frame for next delta comparison
         *prev_frame = rgba;

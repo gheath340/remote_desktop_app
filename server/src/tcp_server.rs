@@ -26,8 +26,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(
     println!("New connection: {:#?}", tls);
 
     //send first frame right on connection
-    //message_type_handlers::handle_frame_full(&mut tls)?;
-
     let mut capturer = ActiveCapturer::new()?;
     let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
     let width = width_u32 as usize;
@@ -137,7 +135,6 @@ pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &
     stream.write_all(&len_bytes)?;
 
     //write payload and make sure it goes
-    //let compressed = compress_prepend_size(&payload);
     stream.write_all(&payload)?;
     if msg_type == MessageType::FrameEnd {
         stream.flush()?;
