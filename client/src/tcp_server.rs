@@ -4,7 +4,8 @@ use std::{
     net::TcpStream,
     io::{ Write, Read },
     error::Error,
-    sync::{ Arc, Mutex, mpsc },
+    sync::{ Arc, mpsc },
+    time::{ Instant, Duration },
 };
 use rustls::{ 
     ClientConfig, 
@@ -104,6 +105,9 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         pixels.render().unwrap();
     }
 
+    let mut last_frame = Instant::now();
+    let mut frame_count = 0u32;
+
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
@@ -111,20 +115,24 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             Event::UserEvent(UserEvent::NewUpdate) => {
                 let mut got_any = false;
                 while let Ok(update) = channel_reciever.try_recv() {
-                    got_any = true;
                     match update {
                         FrameUpdate::Full(bytes) => {
                             if let Err(e) = message_type_handlers::handle_frame_full(&bytes, &mut pixels) {
                                 eprintln!("Frame full error: {e}");
                             }
+                            got_any = true;
                         }
                         //I dont want handle_frame_delta to actually change the window, i want it to hold the updates until FrameEnd is called
                         FrameUpdate::Delta(bytes) => {
                             if let Err(e) = message_type_handlers::handle_frame_delta(&bytes, &mut pixels) {
                                 eprintln!("Frame delta error: {e}");
                             }
+                            got_any = true;
                         }
                     }
+                }
+                if got_any {
+                    window.request_redraw();
                 }
             },
             //call window request redraw for consistency
@@ -135,6 +143,12 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             Event::RedrawRequested(_) => {
                 if let Err(e) = pixels.render() {
                     eprintln!("Render error: {e}");
+                }
+                frame_count += 1;
+                if last_frame.elapsed() >= Duration::from_secs(1) {
+                    println!("FPS: {}", frame_count);
+                    frame_count = 0;
+                    last_frame = Instant::now();
                 }
             }
 
@@ -182,6 +196,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<Fr
 
             MessageType::FrameFull => {
                 let decompressed = decompress_size_prepended(&payload)?;
+                println!("📦 Received frame: {} bytes", decompressed.len());
                 channel_transmitter.send(FrameUpdate::Full(decompressed)).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
             },

@@ -60,7 +60,6 @@ pub fn handle_frame_delta(payload: &[u8], pixels: &mut pixels::Pixels) -> Result
     let extent = pixels.texture().size();
     let frame = pixels.frame_mut();
     let fw = extent.width as usize;
-    let fh = extent.height as usize;
 
     for _ in 0..rect_count {
         if offset + 16 > payload.len() {
@@ -81,7 +80,6 @@ pub fn handle_frame_delta(payload: &[u8], pixels: &mut pixels::Pixels) -> Result
         let data = &payload[offset..offset+rect_size];
         offset += rect_size;
 
-        let stride = fw * 4;
         for row in 0..h {
             let dest_start = ((y + row) * fw + x) * 4;
             let dest_end = dest_start + w * 4;
