@@ -80,11 +80,23 @@ pub mod capture_macos {
             let ptr = unsafe { CFDataGetBytePtr(cfdata.as_concrete_TypeRef()) };
             let bytes = unsafe { std::slice::from_raw_parts(ptr, len).to_vec() };
 
-            // ✅ convert BGRA → RGBA
+            let stride = len / height;
+            let row_bytes = width * 4;
+
             let mut rgba = Vec::with_capacity(width * height * 4);
-            for chunk in bytes.chunks_exact(4) {
-                rgba.extend_from_slice(&[chunk[2], chunk[1], chunk[0], chunk[3]]);
+            for y in 0..height {
+                let row_start = y * stride;
+                let row = &bytes[row_start .. row_start + row_bytes];
+                for chunk in row.chunks_exact(4) {
+                    rgba.extend_from_slice(&[chunk[2], chunk[1], chunk[0], chunk[3]]);
+                }
             }
+
+            // ✅ convert BGRA → RGBA
+            // let mut rgba = Vec::with_capacity(width * height * 4);
+            // for chunk in bytes.chunks_exact(4) {
+            //     rgba.extend_from_slice(&[chunk[2], chunk[1], chunk[0], chunk[3]]);
+            // }
 
             Ok((width as u32, height as u32, rgba))
         }

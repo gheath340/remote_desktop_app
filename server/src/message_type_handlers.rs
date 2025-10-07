@@ -37,13 +37,10 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
 //helper function to get display capturer and rgba image from capturer
 // pub fn create_capturer_convert_to_rgba() -> Result<(usize, usize, Vec<u8>), Box<dyn Error>> {
 //     //get display(main monitor) and capturer(captures display)
-//     // let display = scrap::Display::primary()?;
-//     // let mut capturer = scrap::Capturer::new(display)?;
 //     let mut capturer = ActiveCapturer::new()?;
-//     let (width, height, rgba) = capturer.capture_frame()?;
-
-//     // let width = capturer.width();
-//     // let height = capturer.height();
+//     let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
+//     let width = width_u32 as usize;
+//     let height = height_u32 as usize;
 
 //     //grab frame, if WouldBlock wait and try again until it works
 //     let frame = loop {
@@ -85,7 +82,9 @@ pub fn handle_frame_full<T: Write>(stream: &mut T) -> Result<(), Box<dyn Error>>
     //get image to display and dimensions
     // let (width, height, rgba) = create_capturer_convert_to_rgba()?;
     let mut capturer = ActiveCapturer::new()?;
-    let (width, height, rgba) = capturer.capture_frame()?;
+    let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
+    let width = width_u32 as usize;
+    let height = height_u32 as usize;
 
     //add image dimensions and image data to payload
     let mut payload = Vec::with_capacity(8 + rgba.len());
