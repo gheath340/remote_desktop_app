@@ -182,12 +182,12 @@ fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<Fr
 
             MessageType::FrameFull => {
                 let decompressed = decompress_size_prepended(&payload)?;
-                channel_transmitter.send(FrameUpdate::Full(payload)).ok();
+                channel_transmitter.send(FrameUpdate::Full(decompressed)).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
             },
             MessageType::FrameDelta => {
                 let decompressed = decompress_size_prepended(&payload)?;
-                channel_transmitter.send(FrameUpdate::Delta(payload)).ok();
+                channel_transmitter.send(FrameUpdate::Delta(decompressed)).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
             }
             MessageType::FrameEnd => {
