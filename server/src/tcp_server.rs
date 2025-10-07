@@ -26,10 +26,11 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(
     println!("New connection: {:#?}", tls);
 
     //send first frame right on connection
-    let mut capturer = ActiveCapturer::new()?;
-    let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
-    let width = width_u32 as usize;
-    let height = height_u32 as usize;
+    let (width, height, rgba) = message_type_handlers::create_capturer_convert_to_rgba()?;
+    // let mut capturer = ActiveCapturer::new()?;
+    // let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
+    // let width = width_u32 as usize;
+    // let height = height_u32 as usize;
 
     //send one full frame to start
     let mut payload = Vec::with_capacity(8 + rgba.len());

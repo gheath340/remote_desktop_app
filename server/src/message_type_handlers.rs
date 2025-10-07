@@ -32,11 +32,56 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
     Ok(())
 }
 
+pub fn create_capturer_convert_to_rgba() -> Result<(usize, usize, Vec<u8>), Box<dyn Error>> {
+    //get display(main monitor) and capturer(captures display)
+    let display = scrap::Display::primary()?;
+    let mut capturer = scrap::Capturer::new(display)?;
+
+    let width = capturer.width();
+    let height = capturer.height();
+
+    //grab frame, if WouldBlock wait and try again until it works
+    let frame = loop {
+        match capturer.frame() {
+            Ok(frame) => break frame,
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                continue;
+            }
+            Err(e) => return Err(Box::new(e))
+        }
+    };
+
+    //get the actual width of each line including buffer
+    let stride = frame.len() / height;
+    let mut rgba = Vec::with_capacity(width * height * 4);
+
+    for y in 0..height {
+        //for each row, start at the beginning of the row
+        let row_start = y * stride;
+        //go from start of row to end of expected lenght, ignoring buffer
+        let row_end = row_start + width * 4;
+        let row = &frame[row_start..row_end];
+
+        //for each 4 byte chunk in row get the value
+        for chunk in row.chunks(4) {
+            let b = chunk[0];
+            let g = chunk[1];
+            let r = chunk[2];
+            let a = 255;
+            //reorder them for rgba and add to rgba Vec
+            rgba.extend_from_slice(&[r, g, b, a]);
+        }
+    }
+    Ok((width, height, rgba))
+}
+
 pub fn handle_frame_full<T: Write>(stream: &mut T) -> Result<(), Box<dyn Error>> {
     //get image to display and dimensions
-    let mut capturer = ActiveCapturer::new()?;
-    let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
-    let (width, height) = (width_u32 as usize, height_u32 as usize);
+    let (width, height, rgba) = create_capturer_convert_to_rgba()?;
+    // let mut capturer = ActiveCapturer::new()?;
+    // let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
+    // let (width, height) = (width_u32 as usize, height_u32 as usize);
 
 
     //add image dimensions and image data to payload
@@ -56,8 +101,9 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
     let start_total = Instant::now();
 
     let t0 = Instant::now();
-    let mut capturer = ActiveCapturer::new()?;
-    let (_, _, rgba) = capturer.capture_frame()?;
+    // let mut capturer = ActiveCapturer::new()?;
+    // let (_, _, rgba) = capturer.capture_frame()?;
+    let (_, _, rgba) = create_capturer_convert_to_rgba()?;
     let capture_ms = t0.elapsed().as_millis();
 
     //block size for delta comparison
