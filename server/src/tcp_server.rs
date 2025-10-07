@@ -6,6 +6,7 @@ use std::{
     io::{ Read, Write, ErrorKind }, 
     error::Error, 
     sync::Arc, 
+    time::Instant,
 };
 use rustls::{ 
     ServerConfig, 
@@ -15,39 +16,51 @@ use rustls::{
 use common::message_type::MessageType;
 use crate::message_type_handlers;
 use lz4_flex::compress_prepend_size;
+use crate::sck::start_sck_stream;
 
 
-fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(), Box<dyn Error>> {
-    //create TLS server machine then create TLS stream
+fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn std::error::Error>> {
+    // --- Create TLS stream ---
     let mut tls_conn = ServerConnection::new(tls_config.clone())?;
     let mut tls = Stream::new(&mut tls_conn, &mut tcp);
 
     println!("New connection: {:#?}", tls);
 
-    //send first frame right on connection
-    let (width, height, rgba) = message_type_handlers::create_capturer_convert_to_rgba()?;
+    // --- Start ScreenCaptureKit capture ---
+    let rx = start_sck_stream();
+    println!("ScreenCaptureKit capture started…");
 
-    //send one full frame to start
+    // --- Wait for first frame ---
+    let (width, height, rgba) = rx.recv()?; 
+    println!("Got first frame from ScreenCaptureKit: {width}x{height}");
+
+    // --- Send first full frame immediately ---
     let mut payload = Vec::with_capacity(8 + rgba.len());
     payload.extend_from_slice(&(width as u32).to_be_bytes());
     payload.extend_from_slice(&(height as u32).to_be_bytes());
     payload.extend_from_slice(&rgba);
     let compressed = compress_prepend_size(&payload);
     send_response(&mut tls, MessageType::FrameFull, &compressed)?;
+    println!("Sent initial full frame");
 
-    //keep previous frame for delta comparison
     let mut prev_frame = rgba;
 
-    //message_type_handlers::handle_frame_delta(&mut tls)?;
     loop {
+        // get the next frame from ScreenCaptureKit
+        let Ok((_, _, rgba)) = rx.recv() else {
+            eprintln!("Frame stream ended");
+            break;
+        };
+
+        // use your existing delta handler
         if let Err(e) = message_type_handlers::handle_frame_delta(&mut tls, &mut prev_frame, width, height) {
             eprintln!("Stream error: {e}");
-            break
+            break;
         }
+
         std::thread::sleep(std::time::Duration::from_millis(33));
     }
 
-    //read message from client
     dispatcher(&mut tls)?;
 
     Ok(())
@@ -63,6 +76,7 @@ pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
     }
     Ok(())
 }
+
 //takes info from client and dispatches to correct MessageType handler
 fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
     loop{
