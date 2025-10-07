@@ -14,6 +14,8 @@ use rustls::{
 };
 use common::message_type::MessageType;
 use crate::message_type_handlers;
+use lz4_flex::compress_prepend_size;
+use crate::screen_capture::{ScreenCapturer, ActiveCapturer};
 
 
 fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(), Box<dyn Error>> {
@@ -26,14 +28,18 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(
     //send first frame right on connection
     //message_type_handlers::handle_frame_full(&mut tls)?;
 
-    let (width, height, rgba) = message_type_handlers::create_capturer_convert_to_rgba()?;
+    let mut capturer = ActiveCapturer::new()?;
+    let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
+    let width = width_u32 as usize;
+    let height = height_u32 as usize;
 
     //send one full frame to start
     let mut payload = Vec::with_capacity(8 + rgba.len());
     payload.extend_from_slice(&(width as u32).to_be_bytes());
     payload.extend_from_slice(&(height as u32).to_be_bytes());
     payload.extend_from_slice(&rgba);
-    send_response(&mut tls, MessageType::FrameFull, &payload)?;
+    let compressed = compress_prepend_size(&payload);
+    send_response(&mut tls, MessageType::FrameFull, &compressed)?;
 
     //keep previous frame for delta comparison
     let mut prev_frame = rgba;
@@ -44,7 +50,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(
             eprintln!("Stream error: {e}");
             break
         }
-        std::thread::sleep(std::time::Duration::from_millis(16));
+        std::thread::sleep(std::time::Duration::from_millis(33));
     }
 
     //read message from client
@@ -131,8 +137,11 @@ pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &
     stream.write_all(&len_bytes)?;
 
     //write payload and make sure it goes
-    stream.write_all(payload)?;
-    stream.flush()?;
+    //let compressed = compress_prepend_size(&payload);
+    stream.write_all(&payload)?;
+    if msg_type == MessageType::FrameEnd {
+        stream.flush()?;
+    }
 
     Ok(())
 }
