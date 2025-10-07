@@ -1,12 +1,11 @@
 use std::{ 
-    io::{ Write, }, 
+    io::{ Write, ErrorKind }, 
     error::Error, 
     time::Instant,
 };
 use crate::tcp_server::send_response;
 use common::message_type::MessageType;
 use lz4_flex::compress_prepend_size;
-use crate::screen_capture::{ScreenCapturer, ActiveCapturer};
 
 pub fn handle_text(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
     println!("Text message: {:?}", String::from_utf8_lossy(payload));
@@ -79,10 +78,6 @@ pub fn create_capturer_convert_to_rgba() -> Result<(usize, usize, Vec<u8>), Box<
 pub fn handle_frame_full<T: Write>(stream: &mut T) -> Result<(), Box<dyn Error>> {
     //get image to display and dimensions
     let (width, height, rgba) = create_capturer_convert_to_rgba()?;
-    // let mut capturer = ActiveCapturer::new()?;
-    // let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
-    // let (width, height) = (width_u32 as usize, height_u32 as usize);
-
 
     //add image dimensions and image data to payload
     let mut payload = Vec::with_capacity(8 + rgba.len());
@@ -101,8 +96,6 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
     let start_total = Instant::now();
 
     let t0 = Instant::now();
-    // let mut capturer = ActiveCapturer::new()?;
-    // let (_, _, rgba) = capturer.capture_frame()?;
     let (_, _, rgba) = create_capturer_convert_to_rgba()?;
     let capture_ms = t0.elapsed().as_millis();
 

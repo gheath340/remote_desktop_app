@@ -15,7 +15,6 @@ use rustls::{
 use common::message_type::MessageType;
 use crate::message_type_handlers;
 use lz4_flex::compress_prepend_size;
-use crate::screen_capture::{ScreenCapturer, ActiveCapturer};
 
 
 fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(), Box<dyn Error>> {
@@ -27,10 +26,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result <(
 
     //send first frame right on connection
     let (width, height, rgba) = message_type_handlers::create_capturer_convert_to_rgba()?;
-    // let mut capturer = ActiveCapturer::new()?;
-    // let (width_u32, height_u32, rgba) = capturer.capture_frame()?;
-    // let width = width_u32 as usize;
-    // let height = height_u32 as usize;
 
     //send one full frame to start
     let mut payload = Vec::with_capacity(8 + rgba.len());
