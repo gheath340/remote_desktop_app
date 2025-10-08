@@ -26,7 +26,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     void *baseAddress   = CVPixelBufferGetBaseAddress(imageBuffer);
 
     if (self.cb && baseAddress) {
-        //NSLog(@"Frame captured %zux%zu", width, height);
+        //NSLog(@"Frame captured at %.3f", [NSDate timeIntervalSinceReferenceDate]);
         self.cb((const uint8_t*)baseAddress,
                 (uint32_t)width,
                 (uint32_t)height,
