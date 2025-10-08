@@ -104,91 +104,89 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
 
     let mut changed_pixels: usize = 0;
 
-        //calculate block width and height so edge blocks dont overflow
-        //then compare current frame pixles vs previous frame, mark block as changed if different
-        let t1 = Instant::now();
-        for by in (0..height).step_by(block_size) {
-            for bx in (0..width).step_by(block_size) {
-                let bw = block_size.min(width - bx);
-                let bh = block_size.min(height - by);
+    //calculate block width and height so edge blocks dont overflow
+    //then compare current frame pixles vs previous frame, mark block as changed if different
+    for by in (0..height).step_by(block_size) {
+        for bx in (0..width).step_by(block_size) {
+            let bw = block_size.min(width - bx);
+            let bh = block_size.min(height - by);
 
-                let mut changed = false;
-                'outer: for row in 0..bh {
-                    let cur_off = ((by + row) * width + bx) * 4;
-                    let prev_off = cur_off;
-                    let len = bw * 4;
-                    if &rgba[cur_off..cur_off + len] != &prev_frame[prev_off..prev_off + len] {
-                        changed = true;
-                        break 'outer;
-                    }
+            let mut changed = false;
+            'outer: for row in 0..bh {
+                let cur_off = ((by + row) * width + bx) * 4;
+                let prev_off = cur_off;
+                let len = bw * 4;
+                if &rgba[cur_off..cur_off + len] != &prev_frame[prev_off..prev_off + len] {
+                    changed = true;
+                    break 'outer;
                 }
-                //if block changed build payload with new info and send to client
-                if changed {
-                    changed_pixels += bw * bh;
-                    rect_count += 1;
-                    frame_changes.extend_from_slice(&(bx as u32).to_be_bytes());
-                    frame_changes.extend_from_slice(&(by as u32).to_be_bytes());
-                    frame_changes.extend_from_slice(&(bw as u32).to_be_bytes());
-                    frame_changes.extend_from_slice(&(bh as u32).to_be_bytes());
+            }
+            //if block changed build payload with new info and send to client
+            if changed {
+                changed_pixels += bw * bh;
+                rect_count += 1;
+                frame_changes.extend_from_slice(&(bx as u32).to_be_bytes());
+                frame_changes.extend_from_slice(&(by as u32).to_be_bytes());
+                frame_changes.extend_from_slice(&(bw as u32).to_be_bytes());
+                frame_changes.extend_from_slice(&(bh as u32).to_be_bytes());
 
-                    for row in 0..bh {
-                        let start = ((by + row) * width + bx) * 4;
-                        let end = start + bw * 4;
-                        frame_changes.extend_from_slice(&rgba[start..end]);
-                    }
+                for row in 0..bh {
+                    let start = ((by + row) * width + bx) * 4;
+                    let end = start + bw * 4;
+                    frame_changes.extend_from_slice(&rgba[start..end]);
                 }
             }
         }
-        let compare_loop_ms = t1.elapsed().as_millis();
-        println!("Compare: {}ms", compare_loop_ms);
-        if rect_count > 0 {
-            let total_pixels = width * height;
-            let change_ratio = changed_pixels as f32 / total_pixels as f32;
+    }
+    if rect_count > 0 {
+        let total_pixels = width * height;
+        let change_ratio = changed_pixels as f32 / total_pixels as f32;
 
-            let t2 = Instant::now();
-            if change_ratio > 0.5 {
-                // --- Too much changed → send FULL frame with TurboJPEG ---
-                let image = Image {
-                    pixels: rgba.as_slice(),
-                    width,
-                    pitch: width * 4, // bytes per row
-                    height,
-                    format: PixelFormat::RGBA,
-                };
+        let t2 = Instant::now();
+        if change_ratio > 0.5 {
+            // --- Too much changed → send FULL frame with TurboJPEG ---
+            let image = Image {
+                pixels: rgba.as_slice(),
+                width,
+                pitch: width * 4, // bytes per row
+                height,
+                format: PixelFormat::RGBA,
+            };
 
-                // Create compressor + output buffer
-                let mut compressor = Compressor::new()?;
-                compressor.set_subsamp(Subsamp::Sub2x2);
-                compressor.set_quality(80);
+            // Create compressor + output buffer
+            let mut compressor = Compressor::new()?;
+            let _ = compressor.set_subsamp(Subsamp::Sub2x2);
+            let _ = compressor.set_quality(80);
 
-                let mut output = OutputBuf::new_owned();
+            let mut output = OutputBuf::new_owned();
 
-                // Compress
-                compressor.compress(image, &mut output)?;
+            // Compress
+            compressor.compress(image, &mut output)?;
 
-                let jpeg_data = output.as_ref();
+            let jpeg_data = output.as_ref();
 
-                send_response(stream, MessageType::FrameFull, &jpeg_data)?;
-                let full_frame_ms = t2.elapsed().as_millis();
-                println!("Full frame: {}ms", full_frame_ms);
-            } else {
-                let t3 = Instant::now();
-                let mut payload = Vec::with_capacity(4 + frame_changes.len());
-                payload.extend_from_slice(&rect_count.to_be_bytes());
-                payload.extend_from_slice(&frame_changes);
+            send_response(stream, MessageType::FrameFull, &jpeg_data)?;
+            let full_frame_ms = t2.elapsed().as_millis();
+            println!("Full frame: {}ms", full_frame_ms);
+        } else {
+            let t3 = Instant::now();
+            let mut payload = Vec::with_capacity(4 + frame_changes.len());
+            payload.extend_from_slice(&rect_count.to_be_bytes());
+            payload.extend_from_slice(&frame_changes);
 
-                let compressed = lz4_flex::compress_prepend_size(&payload);
-                send_response(stream, MessageType::FrameDelta, &compressed)?;
-                let delta_frame_ms = t3.elapsed().as_millis();
-                println!("Delta frame: {}ms", delta_frame_ms);
-            }
+            let compressed = lz4_flex::compress_prepend_size(&payload);
+            send_response(stream, MessageType::FrameDelta, &compressed)?;
+            let delta_frame_ms = t3.elapsed().as_millis();
+            println!("Delta frame: {}ms", delta_frame_ms);
         }
-        send_response(stream, MessageType::FrameEnd, &[])?;
-        println!("Total: {}ms", start_total);
+    }
+    send_response(stream, MessageType::FrameEnd, &[])?;
+    let total_ms = start_total.elapsed().as_millis();
+    println!("Total: {}ms\n", total_ms);
 
-        // Save this frame for next delta comparison
-        *prev_frame = rgba;
-        Ok(())
+    // Save this frame for next delta comparison
+    *prev_frame = rgba;
+    Ok(())
 }
 
 pub fn handle_cursor_shape(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
