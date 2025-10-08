@@ -2,7 +2,7 @@ use common::message_type::MessageType;
 use std::{ 
     process,
     net::TcpStream,
-    io::{ Write, Read },
+    io::{ Write, Read, Cursor },
     error::Error,
     sync::{ Arc, mpsc },
     time::{ Instant, Duration },
@@ -21,6 +21,9 @@ use winit::{
 use pixels::{ SurfaceTexture, Pixels };
 use crate::{ message_type_handlers, };
 use lz4_flex::decompress_size_prepended;
+use image::io::Reader as ImageReader;
+use image::DynamicImage;
+use turbojpeg::{Decompressor, Image, PixelFormat};
 
 
  #[derive(Debug)]
@@ -162,6 +165,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
 }
 
 fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>) -> Result<(), Box<dyn Error>> {
+    let mut decompressor = turbojpeg::Decompressor::new()?;
     loop{
         //create header and read data into header
         let mut header = [0u8; 5];
@@ -195,9 +199,29 @@ fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<Fr
             MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
 
             MessageType::FrameFull => {
-                let decompressed = decompress_size_prepended(&payload)?;
-                println!("📦 Received frame: {} bytes", decompressed.len());
-                channel_transmitter.send(FrameUpdate::Full(decompressed)).ok();
+                let start = Instant::now();
+
+                let header = decompressor.read_header(&payload)?;
+                let w = header.width as usize;
+                let h = header.height as usize;
+
+                let mut rgba = vec![0u8; w * h * 4];
+                let mut out = turbojpeg::Image {
+                    pixels: rgba.as_mut_slice(),
+                    width: w,
+                    pitch: w * 4,
+                    height: h,
+                    format: turbojpeg::PixelFormat::RGBA,
+                };
+                decompressor.decompress(&payload, out)?;
+
+                // re-wrap for your existing handler
+                let mut framed = Vec::with_capacity(8 + rgba.len());
+                framed.extend_from_slice(&(w as u32).to_be_bytes());
+                framed.extend_from_slice(&(h as u32).to_be_bytes());
+                framed.extend_from_slice(&rgba);
+
+                channel_transmitter.send(FrameUpdate::Full(framed)).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
             },
             MessageType::FrameDelta => {
