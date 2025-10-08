@@ -6,6 +6,7 @@ use std::{
 use crate::tcp_server::send_response;
 use common::message_type::MessageType;
 use lz4_flex::compress_prepend_size;
+use turbojpeg::{Compressor, Image, PixelFormat, Subsamp, OutputBuf};
 
 pub fn handle_text(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
     println!("Text message: {:?}", String::from_utf8_lossy(payload));
@@ -96,10 +97,12 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
     let start_total = Instant::now();
 
     //block size for delta comparison
-    let block_size = 256;
+    let block_size = 64;
 
     let mut frame_changes = Vec::new();
     let mut rect_count = 0u32;
+
+    let mut changed_pixels: usize = 0;
 
         //calculate block width and height so edge blocks dont overflow
         //then compare current frame pixles vs previous frame, mark block as changed if different
@@ -121,6 +124,7 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
                 }
                 //if block changed build payload with new info and send to client
                 if changed {
+                    changed_pixels += bw * bh;
                     rect_count += 1;
                     frame_changes.extend_from_slice(&(bx as u32).to_be_bytes());
                     frame_changes.extend_from_slice(&(by as u32).to_be_bytes());
@@ -137,22 +141,60 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
         }
         let compare_loop_ms = t1.elapsed().as_millis();
         if rect_count > 0 {
-            let t2 = Instant::now(); 
-            let mut payload = Vec::with_capacity(4 + frame_changes.len());
-            payload.extend_from_slice(&rect_count.to_be_bytes());
-            payload.extend_from_slice(&frame_changes);
+            let total_pixels = width * height;
+            let change_ratio = changed_pixels as f32 / total_pixels as f32;
 
-            let compressed = compress_prepend_size(&payload);
-            let compression_ms = t2.elapsed().as_millis();
-            let t3 = Instant::now();
-            send_response(stream, MessageType::FrameDelta, &compressed)?;
-            let delta_response_ms = t3.elapsed().as_millis();
+            if change_ratio > 0.5 {
+                // --- Too much changed → send FULL frame with TurboJPEG ---
+                let start = Instant::now();
+                let image = Image {
+                    pixels: rgba.as_slice(),
+                    width,
+                    pitch: width * 4, // bytes per row
+                    height,
+                    format: PixelFormat::RGBA,
+                };
 
-            let total_ms = start_total.elapsed().as_millis();
-            println!("compare loop: {}ms | compression: {}ms | send delta: {}ms | total: {}ms", compare_loop_ms, compression_ms, delta_response_ms, total_ms);
+                // Create compressor + output buffer
+                let mut compressor = Compressor::new()?;
+                compressor.set_subsamp(Subsamp::Sub2x2);
+                compressor.set_quality(80);
+
+                let mut output = OutputBuf::new_owned();
+
+                // Compress
+                compressor.compress(image, &mut output)?;
+
+                let jpeg_data = output.as_ref();
+
+                send_response(stream, MessageType::FrameFull, &jpeg_data)?;
+                println!(
+                    "Sent FULL frame ({:.0}% changed) | {} bytes | {:?}",
+                    change_ratio * 100.0,
+                    jpeg_data.len(),
+                    start.elapsed()
+                );
+            } else {
+                // --- Normal delta ---
+                let start = Instant::now();
+                let mut payload = Vec::with_capacity(4 + frame_changes.len());
+                payload.extend_from_slice(&rect_count.to_be_bytes());
+                payload.extend_from_slice(&frame_changes);
+
+                let compressed = lz4_flex::compress_prepend_size(&payload);
+                send_response(stream, MessageType::FrameDelta, &compressed)?;
+
+                println!(
+                    "Sent DELTA ({:.1}% changed, {} rects, {} bytes) | {:?}",
+                    change_ratio * 100.0,
+                    rect_count,
+                    payload.len(),
+                    start.elapsed()
+                );
+            }
         }
-        send_response(stream, MessageType::FrameEnd, &[])?;
 
+        send_response(stream, MessageType::FrameEnd, &[])?;
 
         // Save this frame for next delta comparison
         *prev_frame = rgba;

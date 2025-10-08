@@ -5,7 +5,7 @@ use std::net::{
 use std::{ 
     io::{ Read, Write, ErrorKind }, 
     error::Error, 
-    sync::Arc, 
+    sync::{ Arc, mpsc }, 
     time::Instant,
 };
 use rustls::{ 
@@ -17,6 +17,7 @@ use common::message_type::MessageType;
 use crate::message_type_handlers;
 use lz4_flex::compress_prepend_size;
 use crate::sck::start_sck_stream;
+use turbojpeg::{Compressor, Image, PixelFormat, Subsamp, OutputBuf};
 
 
 fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn std::error::Error>> {
@@ -35,12 +36,32 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     println!("Got first frame from ScreenCaptureKit");
 
     // --- Send first full frame immediately ---
-    let mut payload = Vec::with_capacity(8 + rgba.len());
-    payload.extend_from_slice(&(width as u32).to_be_bytes());
-    payload.extend_from_slice(&(height as u32).to_be_bytes());
-    payload.extend_from_slice(&rgba);
-    let compressed = compress_prepend_size(&payload);
-    send_response(&mut tls, MessageType::FrameFull, &compressed)?;
+    // let mut payload = Vec::with_capacity(8 + rgba.len());
+    // payload.extend_from_slice(&(width as u32).to_be_bytes());
+    // payload.extend_from_slice(&(height as u32).to_be_bytes());
+    // payload.extend_from_slice(&rgba);
+    // let compressed = compress_prepend_size(&payload);
+    // send_response(&mut tls, MessageType::FrameFull, &compressed)?;
+    let mut rgb = Vec::with_capacity(width * height * 3);
+    for chunk in rgba.chunks_exact(4) {
+        rgb.extend_from_slice(&chunk[..3]);
+    }
+    let image = Image {
+        pixels: rgb.as_slice(),
+        width,
+        pitch: width * 3, // bytes per row
+        height,
+        format: PixelFormat::RGB,
+    };
+    // Create compressor + output buffer
+    let mut compressor = Compressor::new()?;
+    compressor.set_subsamp(Subsamp::Sub2x2);
+    compressor.set_quality(80);
+    let mut output = OutputBuf::new_owned();
+    // Compress
+    compressor.compress(image, &mut output)?;
+    let jpeg_data = output.as_ref().to_vec();
+    send_response(&mut tls, MessageType::FrameFull, &jpeg_data)?;
     println!("Sent initial full frame");
 
     let mut prev_frame = rgba;
@@ -133,6 +154,14 @@ fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
 
 //sends given message to server
 pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8]) -> Result<(), Box<dyn Error>> {
+    if msg_type != MessageType::FrameEnd{
+        println!(
+            "SERVER → Sending {:?} | {} bytes | first 8 bytes={:02X?}",
+            msg_type,
+            payload.len(),
+            &payload[..8.min(payload.len())]
+        );
+    }
     //get the byte value from msg_type
     let type_byte = msg_type.to_u8();
 
