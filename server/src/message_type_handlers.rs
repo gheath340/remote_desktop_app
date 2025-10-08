@@ -95,12 +95,8 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
     //get screen as rgba
     let start_total = Instant::now();
 
-    // let t0 = Instant::now();
-    // let (_, _, rgba) = create_capturer_convert_to_rgba()?;
-    // let capture_ms = t0.elapsed().as_millis();
-
     //block size for delta comparison
-    let block_size = 128;
+    let block_size = 256;
 
     let mut frame_changes = Vec::new();
     let mut rect_count = 0u32;

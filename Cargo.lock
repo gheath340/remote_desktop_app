@@ -325,6 +325,7 @@ version = "0.1.0"
 dependencies = [
  "common",
  "image",
+ "lz4_flex",
  "pixels",
  "rustls",
  "rustls-pemfile",
@@ -888,6 +889,15 @@ name = "log"
 version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
+
+[[package]]
+name = "lz4_flex"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08ab2867e3eeeca90e844d1940eab391c9dc5228783db2ed999acbc0a9ed375a"
+dependencies = [
+ "twox-hash",
+]
 
 [[package]]
 name = "malloc_buf"
@@ -1526,8 +1536,11 @@ dependencies = [
 name = "server"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "common",
  "image",
+ "lz4_flex",
+ "objc",
  "rustls",
  "rustls-pemfile",
  "scrap",
@@ -1716,6 +1729,12 @@ name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
+
+[[package]]
+name = "twox-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 
 [[package]]
 name = "ultraviolet"

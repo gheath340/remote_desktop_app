@@ -11,9 +11,10 @@ pub enum MessageType {
     // Display / Frames
     FrameFull   = 0x10,
     FrameDelta  = 0x11,
-    CursorShape = 0x12,
-    CursorPos   = 0x13,
-    Resize      = 0x14,
+    FrameEnd    = 0x12,
+    CursorShape = 0x13,
+    CursorPos   = 0x14,
+    Resize      = 0x15,
 
     // Input
     KeyDown     = 0x20,
@@ -41,9 +42,11 @@ impl MessageType {
 
             0x10 => MessageType::FrameFull,
             0x11 => MessageType::FrameDelta,
-            0x12 => MessageType::CursorShape,
-            0x13 => MessageType::CursorPos,
-            0x14 => MessageType::Resize,
+            0x12 => MessageType::FrameEnd,
+
+            0x13 => MessageType::CursorShape,
+            0x14 => MessageType::CursorPos,
+            0x15 => MessageType::Resize,
 
             0x20 => MessageType::KeyDown,
             0x21 => MessageType::KeyUp,
@@ -67,9 +70,10 @@ impl MessageType {
 
             MessageType::FrameFull   => 0x10,
             MessageType::FrameDelta  => 0x11,
-            MessageType::CursorShape => 0x12,
-            MessageType::CursorPos   => 0x13,
-            MessageType::Resize      => 0x14,
+            MessageType::FrameEnd    => 0x12,
+            MessageType::CursorShape => 0x13,
+            MessageType::CursorPos   => 0x14,
+            MessageType::Resize      => 0x15,
 
             MessageType::KeyDown     => 0x20,
             MessageType::KeyUp       => 0x21,

@@ -16,5 +16,7 @@ fn main() {
         // tell Cargo to rebuild if these files change
         println!("cargo:rerun-if-changed=src/maccapture.m");
         println!("cargo:rerun-if-changed=src/maccapture.h");
+
+        println!("cargo:rustc-link-lib=framework=Accelerate");
     }
 }

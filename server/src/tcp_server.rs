@@ -32,7 +32,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
 
     // --- Wait for first frame ---
     let (width, height, rgba) = rx.recv()?; 
-    println!("Got first frame from ScreenCaptureKit: {width}x{height}");
+    println!("Got first frame from ScreenCaptureKit");
 
     // --- Send first full frame immediately ---
     let mut payload = Vec::with_capacity(8 + rgba.len());
@@ -45,25 +45,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
 
     let mut prev_frame = rgba;
 
-    // loop {
-    //     // get the next frame from ScreenCaptureKit
-    //     let t0 = Instant::now();
-    //     let Ok((_, _, rgba)) = rx.recv() else {
-    //         eprintln!("Frame stream ended");
-    //         break;
-    //     };
-    //     let capture_ms = t0.elapsed().as_millis();
-    //     println!("Capture: {}ms", capture_ms);
-
-    //     // use your existing delta handler
-    //     if let Err(e) = message_type_handlers::handle_frame_delta(&mut tls, &mut prev_frame, width, height, rgba) {
-    //         eprintln!("Stream error: {e}");
-    //         break;
-    //     }
-
-    //     std::thread::sleep(std::time::Duration::from_millis(33));
-    // }
-
     loop {
         let mut latest = None;
         while let Ok(frame) = rx.try_recv() {
@@ -71,15 +52,12 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
         }
 
         if let Some((_, _, rgba)) = latest {
-            let t0 = Instant::now();
             if let Err(e) = message_type_handlers::handle_frame_delta(&mut tls, &mut prev_frame, width, height, rgba) {
                 eprintln!("Stream error: {e}");
                 break;
             }
-            let elapsed = t0.elapsed().as_millis();
-            println!("Capture: {}ms", elapsed);
         }
-        std::thread::sleep(std::time::Duration::from_millis(16));
+        std::thread::sleep(std::time::Duration::from_millis(33));
     }
 
     dispatcher(&mut tls)?;

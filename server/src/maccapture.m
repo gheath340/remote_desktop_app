@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 #import <CoreVideo/CoreVideo.h>
+#import <Accelerate/Accelerate.h>
 #import "maccapture.h"
 
 @interface SCKBridge : NSObject<SCStreamOutput, SCStreamDelegate>
@@ -26,12 +27,36 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     void *baseAddress   = CVPixelBufferGetBaseAddress(imageBuffer);
 
     if (self.cb && baseAddress) {
-        //NSLog(@"Frame captured at %.3f", [NSDate timeIntervalSinceReferenceDate]);
-        self.cb((const uint8_t*)baseAddress,
+        // Convert BGRA → RGBA using vImage (SIMD-optimized, ~10x faster than CPU loop)
+        size_t rowBytes = width * 4;
+        uint8_t *rgbaBuffer = malloc(height * rowBytes);
+
+        vImage_Buffer src = {
+            .data = baseAddress,
+            .height = height,
+            .width = width,
+            .rowBytes = bytesPerRow
+        };
+        vImage_Buffer dst = {
+            .data = rgbaBuffer,
+            .height = height,
+            .width = width,
+            .rowBytes = rowBytes
+        };
+
+        // Perform in-place channel reorder (B,G,R,A → R,G,B,A)
+        uint8_t permuteMap[4] = {2, 1, 0, 3};
+        vImagePermuteChannels_ARGB8888(&src, &dst, permuteMap, kvImageNoFlags);
+
+        // Send RGBA to Rust
+        self.cb((const uint8_t*)rgbaBuffer,
                 (uint32_t)width,
                 (uint32_t)height,
-                (uint32_t)bytesPerRow);
-    }
+                (uint32_t)rowBytes);
+
+        free(rgbaBuffer);
+    }   
+
 
     CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
 }
