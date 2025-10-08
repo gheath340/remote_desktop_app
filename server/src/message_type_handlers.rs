@@ -140,13 +140,14 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
             }
         }
         let compare_loop_ms = t1.elapsed().as_millis();
+        println!("Compare: {}ms", compare_loop_ms);
         if rect_count > 0 {
             let total_pixels = width * height;
             let change_ratio = changed_pixels as f32 / total_pixels as f32;
 
+            let t2 = Instant::now();
             if change_ratio > 0.5 {
                 // --- Too much changed → send FULL frame with TurboJPEG ---
-                let start = Instant::now();
                 let image = Image {
                     pixels: rgba.as_slice(),
                     width,
@@ -168,33 +169,22 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
                 let jpeg_data = output.as_ref();
 
                 send_response(stream, MessageType::FrameFull, &jpeg_data)?;
-                println!(
-                    "Sent FULL frame ({:.0}% changed) | {} bytes | {:?}",
-                    change_ratio * 100.0,
-                    jpeg_data.len(),
-                    start.elapsed()
-                );
+                let full_frame_ms = t2.elapsed().as_millis();
+                println!("Full frame: {}ms", full_frame_ms);
             } else {
-                // --- Normal delta ---
-                let start = Instant::now();
+                let t3 = Instant::now();
                 let mut payload = Vec::with_capacity(4 + frame_changes.len());
                 payload.extend_from_slice(&rect_count.to_be_bytes());
                 payload.extend_from_slice(&frame_changes);
 
                 let compressed = lz4_flex::compress_prepend_size(&payload);
                 send_response(stream, MessageType::FrameDelta, &compressed)?;
-
-                println!(
-                    "Sent DELTA ({:.1}% changed, {} rects, {} bytes) | {:?}",
-                    change_ratio * 100.0,
-                    rect_count,
-                    payload.len(),
-                    start.elapsed()
-                );
+                let delta_frame_ms = t3.elapsed().as_millis();
+                println!("Delta frame: {}ms", delta_frame_ms);
             }
         }
-
         send_response(stream, MessageType::FrameEnd, &[])?;
+        println!("Total: {}ms", start_total);
 
         // Save this frame for next delta comparison
         *prev_frame = rgba;
