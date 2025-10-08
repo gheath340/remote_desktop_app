@@ -91,13 +91,13 @@ pub fn handle_frame_full<T: Write>(stream: &mut T) -> Result<(), Box<dyn Error>>
     Ok(())
 }
 
-pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, width: usize, height: usize) -> Result<(), Box<dyn Error>> {
+pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: Vec<u8>) -> Result<(), Box<dyn Error>> {
     //get screen as rgba
     let start_total = Instant::now();
 
-    let t0 = Instant::now();
-    let (_, _, rgba) = create_capturer_convert_to_rgba()?;
-    let capture_ms = t0.elapsed().as_millis();
+    // let t0 = Instant::now();
+    // let (_, _, rgba) = create_capturer_convert_to_rgba()?;
+    // let capture_ms = t0.elapsed().as_millis();
 
     //block size for delta comparison
     let block_size = 128;
@@ -153,7 +153,7 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
             let delta_response_ms = t3.elapsed().as_millis();
 
             let total_ms = start_total.elapsed().as_millis();
-            println!("capture: {}ms | compare loop: {}ms | compression: {}ms | send delta: {}ms | total: {}ms", capture_ms, compare_loop_ms, compression_ms, delta_response_ms, total_ms);
+            println!("compare loop: {}ms | compression: {}ms | send delta: {}ms | total: {}ms", compare_loop_ms, compression_ms, delta_response_ms, total_ms);
         }
         send_response(stream, MessageType::FrameEnd, &[])?;
 

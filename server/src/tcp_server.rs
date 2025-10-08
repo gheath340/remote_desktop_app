@@ -47,13 +47,16 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
 
     loop {
         // get the next frame from ScreenCaptureKit
+        let t0 = Instant::now();
         let Ok((_, _, rgba)) = rx.recv() else {
             eprintln!("Frame stream ended");
             break;
         };
+        let capture_ms = t0.elapsed().as_millis();
+        println!("Capture: {}ms", capture_ms);
 
         // use your existing delta handler
-        if let Err(e) = message_type_handlers::handle_frame_delta(&mut tls, &mut prev_frame, width, height) {
+        if let Err(e) = message_type_handlers::handle_frame_delta(&mut tls, &mut prev_frame, width, height, rgba) {
             eprintln!("Stream error: {e}");
             break;
         }
