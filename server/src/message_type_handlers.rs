@@ -92,20 +92,13 @@ pub fn handle_frame_full<T: Write>(stream: &mut T) -> Result<(), Box<dyn Error>>
     Ok(())
 }
 
-pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: Vec<u8>) -> Result<(), Box<dyn Error>> {
-    //get screen as rgba
-    let start_total = Instant::now();
-
-    //block size for delta comparison
+//calculate how many pixel blocks have changed
+pub fn calculate_rect_cout(prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: &Vec<u8>) -> (Vec<u8>, u32, usize) {
     let block_size = 64;
-
+    let mut changed_pixels: usize = 0;
     let mut frame_changes = Vec::new();
     let mut rect_count = 0u32;
 
-    let mut changed_pixels: usize = 0;
-
-    //calculate block width and height so edge blocks dont overflow
-    //then compare current frame pixles vs previous frame, mark block as changed if different
     for by in (0..height).step_by(block_size) {
         for bx in (0..width).step_by(block_size) {
             let bw = block_size.min(width - bx);
@@ -138,6 +131,22 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
             }
         }
     }
+    (frame_changes, rect_count, changed_pixels)
+}
+
+pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: Vec<u8>) -> Result<(), Box<dyn Error>> {
+    //get screen as rgba
+    let start_total = Instant::now();
+
+    // Create compressor + output buffer
+    let mut compressor = Compressor::new()?;
+    let _ = compressor.set_subsamp(Subsamp::Sub2x2);
+    let _ = compressor.set_quality(80);
+
+    let mut output = OutputBuf::new_owned();
+
+    let (frame_changes, rect_count, changed_pixels) = calculate_rect_cout(prev_frame, width, height, &rgba);
+
     if rect_count > 0 {
         let total_pixels = width * height;
         let change_ratio = changed_pixels as f32 / total_pixels as f32;
@@ -152,13 +161,6 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
                 height,
                 format: PixelFormat::RGBA,
             };
-
-            // Create compressor + output buffer
-            let mut compressor = Compressor::new()?;
-            let _ = compressor.set_subsamp(Subsamp::Sub2x2);
-            let _ = compressor.set_quality(80);
-
-            let mut output = OutputBuf::new_owned();
 
             // Compress
             compressor.compress(image, &mut output)?;

@@ -5,20 +5,26 @@ use std::net::{
 use std::{ 
     io::{ Read, Write, ErrorKind }, 
     error::Error, 
-    sync::{ Arc, }, 
+    sync::{ Arc }, 
 };
 use rustls::{ 
     ServerConfig, 
     ServerConnection, 
     Stream, 
 };
+use turbojpeg::{ Compressor, 
+    Image, 
+    PixelFormat, 
+    Subsamp, 
+    OutputBuf,
+};
 use common::message_type::MessageType;
 use crate::message_type_handlers;
 use crate::sck::start_sck_stream;
-use turbojpeg::{Compressor, Image, PixelFormat, Subsamp, OutputBuf};
 
 
 fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn std::error::Error>> {
+    tcp.set_nodelay(true).expect("set_nodelay failed");
     // --- Create TLS stream ---
     let mut tls_conn = ServerConnection::new(tls_config.clone())?;
     let mut tls = Stream::new(&mut tls_conn, &mut tcp);
@@ -69,7 +75,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
                 break;
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(33));
+        std::thread::sleep(std::time::Duration::from_millis(16));
     }
 
     dispatcher(&mut tls)?;
