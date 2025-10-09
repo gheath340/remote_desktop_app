@@ -36,11 +36,11 @@ pub fn handle_frame_full<T: Write>(stream: &mut T, compressor: &mut Compressor, 
 
     //create image and tell decoder how to handle image
     let image = Image {
-                pixels: rgba.as_mut_slice(), //mut slice pointing to rgba buffer
-                width: w, //width of jpeg
-                pitch: w * 4, //how many bytes per row(width * 4 for rgba)
-                height: h, //height of jpeg
-                format: turbojpeg::PixelFormat::RGBA, //the format you want the output to be
+                pixels: rgba.as_slice(), //mut slice pointing to rgba buffer
+                width: width, //width of jpeg
+                pitch: width * 4, //how many bytes per row(width * 4 for rgba)
+                height: height, //height of jpeg
+                format: PixelFormat::RGBA, //the format you want the output to be
             };
 
     // Compress image into output buffer

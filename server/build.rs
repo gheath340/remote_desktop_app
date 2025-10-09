@@ -19,4 +19,9 @@ fn main() {
 
         println!("cargo:rustc-link-lib=framework=Accelerate");
     }
+
+    #[cfg(target_os = "linux")] 
+    {
+        println!("cargo:rerun-if-changed=src/capture/linux.rs");
+    }
 }
