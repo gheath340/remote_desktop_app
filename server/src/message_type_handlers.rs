@@ -78,22 +78,22 @@ pub fn create_capturer_convert_to_rgba() -> Result<(usize, usize, Vec<u8>), Box<
 
 pub fn handle_frame_full<T: Write>(stream: &mut T) -> Result<(), Box<dyn Error>> {
     //get image to display and dimensions
-    let (width, height, rgba) = create_capturer_convert_to_rgba()?;
+    // let (width, height, rgba) = create_capturer_convert_to_rgba()?;
 
-    //add image dimensions and image data to payload
-    let mut payload = Vec::with_capacity(8 + rgba.len());
-    payload.extend_from_slice(&(width as u32).to_be_bytes());
-    payload.extend_from_slice(&(height as u32).to_be_bytes());
-    payload.extend_from_slice(&rgba);
+    // //add image dimensions and image data to payload
+    // let mut payload = Vec::with_capacity(8 + rgba.len());
+    // payload.extend_from_slice(&(width as u32).to_be_bytes());
+    // payload.extend_from_slice(&(height as u32).to_be_bytes());
+    // payload.extend_from_slice(&rgba);
 
-    let compressed = compress_prepend_size(&payload);
+    // let compressed = compress_prepend_size(&payload);
 
-    send_response(stream, MessageType::FrameFull, &compressed)?;
+    // send_response(stream, MessageType::FrameFull, &compressed)?;
     Ok(())
 }
 
 //calculate how many pixel blocks have changed
-pub fn calculate_rect_cout(prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: &Vec<u8>) -> (Vec<u8>, u32, usize) {
+pub fn calculate_frame_changes(prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: &Vec<u8>) -> (Vec<u8>, u32, usize) {
     let block_size = 64;
     let mut changed_pixels: usize = 0;
     let mut frame_changes = Vec::new();
@@ -145,7 +145,7 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
 
     let mut output = OutputBuf::new_owned();
 
-    let (frame_changes, rect_count, changed_pixels) = calculate_rect_cout(prev_frame, width, height, &rgba);
+    let (frame_changes, rect_count, changed_pixels) = calculate_frame_changes(prev_frame, width, height, &rgba);
 
     if rect_count > 0 {
         let total_pixels = width * height;
