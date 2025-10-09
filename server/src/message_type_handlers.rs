@@ -1,11 +1,10 @@
 use std::{ 
-    io::{ Write, ErrorKind }, 
+    io::{ Write }, 
     error::Error, 
     time::Instant,
 };
 use crate::tcp_server::send_response;
 use common::message_type::MessageType;
-use lz4_flex::compress_prepend_size;
 use turbojpeg::{Compressor, Image, PixelFormat, Subsamp, OutputBuf};
 
 pub fn handle_text(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
@@ -32,144 +31,52 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
     Ok(())
 }
 
-pub fn create_capturer_convert_to_rgba() -> Result<(usize, usize, Vec<u8>), Box<dyn Error>> {
-    //get display(main monitor) and capturer(captures display)
-    let display = scrap::Display::primary()?;
-    let mut capturer = scrap::Capturer::new(display)?;
+pub fn handle_frame_full<T: Write>(stream: &mut T, compressor: &mut Compressor, output: &mut OutputBuf, rgba: &Vec<u8>, width: usize, height: usize) -> Result<(), Box<dyn Error>> {
+    let t2 = Instant::now();
 
-    let width = capturer.width();
-    let height = capturer.height();
+    //create image and tell decoder how to handle image
+    let image = Image {
+                pixels: rgba.as_mut_slice(), //mut slice pointing to rgba buffer
+                width: w, //width of jpeg
+                pitch: w * 4, //how many bytes per row(width * 4 for rgba)
+                height: h, //height of jpeg
+                format: turbojpeg::PixelFormat::RGBA, //the format you want the output to be
+            };
 
-    //grab frame, if WouldBlock wait and try again until it works
-    let frame = loop {
-        match capturer.frame() {
-            Ok(frame) => break frame,
-            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                std::thread::sleep(std::time::Duration::from_millis(5));
-                continue;
-            }
-            Err(e) => return Err(Box::new(e))
-        }
-    };
+    // Compress image into output buffer
+    compressor.compress(image, output)?;
 
-    //get the actual width of each line including buffer
-    let stride = frame.len() / height;
-    let mut rgba = Vec::with_capacity(width * height * 4);
+    //send reference of output buffer
+    send_response(stream, MessageType::FrameFull, output.as_ref())?;
+    let full_frame_ms = t2.elapsed().as_millis();
+    println!("Full frame: {}ms", full_frame_ms);
 
-    for y in 0..height {
-        //for each row, start at the beginning of the row
-        let row_start = y * stride;
-        //go from start of row to end of expected lenght, ignoring buffer
-        let row_end = row_start + width * 4;
-        let row = &frame[row_start..row_end];
-
-        //for each 4 byte chunk in row get the value
-        for chunk in row.chunks(4) {
-            let b = chunk[0];
-            let g = chunk[1];
-            let r = chunk[2];
-            let a = 255;
-            //reorder them for rgba and add to rgba Vec
-            rgba.extend_from_slice(&[r, g, b, a]);
-        }
-    }
-    Ok((width, height, rgba))
-}
-
-pub fn handle_frame_full<T: Write>(stream: &mut T) -> Result<(), Box<dyn Error>> {
-    //get image to display and dimensions
-    // let (width, height, rgba) = create_capturer_convert_to_rgba()?;
-
-    // //add image dimensions and image data to payload
-    // let mut payload = Vec::with_capacity(8 + rgba.len());
-    // payload.extend_from_slice(&(width as u32).to_be_bytes());
-    // payload.extend_from_slice(&(height as u32).to_be_bytes());
-    // payload.extend_from_slice(&rgba);
-
-    // let compressed = compress_prepend_size(&payload);
-
-    // send_response(stream, MessageType::FrameFull, &compressed)?;
     Ok(())
 }
 
-//calculate how many pixel blocks have changed
-pub fn calculate_frame_changes(prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: &Vec<u8>) -> (Vec<u8>, u32, usize) {
-    let block_size = 64;
-    let mut changed_pixels: usize = 0;
-    let mut frame_changes = Vec::new();
-    let mut rect_count = 0u32;
-
-    for by in (0..height).step_by(block_size) {
-        for bx in (0..width).step_by(block_size) {
-            let bw = block_size.min(width - bx);
-            let bh = block_size.min(height - by);
-
-            let mut changed = false;
-            'outer: for row in 0..bh {
-                let cur_off = ((by + row) * width + bx) * 4;
-                let prev_off = cur_off;
-                let len = bw * 4;
-                if &rgba[cur_off..cur_off + len] != &prev_frame[prev_off..prev_off + len] {
-                    changed = true;
-                    break 'outer;
-                }
-            }
-            //if block changed build payload with new info and send to client
-            if changed {
-                changed_pixels += bw * bh;
-                rect_count += 1;
-                frame_changes.extend_from_slice(&(bx as u32).to_be_bytes());
-                frame_changes.extend_from_slice(&(by as u32).to_be_bytes());
-                frame_changes.extend_from_slice(&(bw as u32).to_be_bytes());
-                frame_changes.extend_from_slice(&(bh as u32).to_be_bytes());
-
-                for row in 0..bh {
-                    let start = ((by + row) * width + bx) * 4;
-                    let end = start + bw * 4;
-                    frame_changes.extend_from_slice(&rgba[start..end]);
-                }
-            }
-        }
-    }
-    (frame_changes, rect_count, changed_pixels)
-}
-
 pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: Vec<u8>) -> Result<(), Box<dyn Error>> {
-    //get screen as rgba
+    //start timer
     let start_total = Instant::now();
 
     // Create compressor + output buffer
     let mut compressor = Compressor::new()?;
     let _ = compressor.set_subsamp(Subsamp::Sub2x2);
     let _ = compressor.set_quality(80);
-
     let mut output = OutputBuf::new_owned();
 
+    //get all frame changes, count of parts of screen that changed and amount of changed pixels
     let (frame_changes, rect_count, changed_pixels) = calculate_frame_changes(prev_frame, width, height, &rgba);
 
+    //if there actually was a change
     if rect_count > 0 {
+        //calculate how much of the image changed
         let total_pixels = width * height;
         let change_ratio = changed_pixels as f32 / total_pixels as f32;
 
-        let t2 = Instant::now();
+        //if more than half the image changed handle it as a full frame change
         if change_ratio > 0.5 {
-            // --- Too much changed → send FULL frame with TurboJPEG ---
-            let image = Image {
-                pixels: rgba.as_slice(),
-                width,
-                pitch: width * 4, // bytes per row
-                height,
-                format: PixelFormat::RGBA,
-            };
-
-            // Compress
-            compressor.compress(image, &mut output)?;
-
-            let jpeg_data = output.as_ref();
-
-            send_response(stream, MessageType::FrameFull, &jpeg_data)?;
-            let full_frame_ms = t2.elapsed().as_millis();
-            println!("Full frame: {}ms", full_frame_ms);
+            handle_frame_full(stream, &mut compressor, &mut output, &rgba, width, height)?;
+        //if less than half of the image changed handle it as delta change
         } else {
             let t3 = Instant::now();
             let mut payload = Vec::with_capacity(4 + frame_changes.len());
@@ -182,6 +89,7 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
             println!("Delta frame: {}ms", delta_frame_ms);
         }
     }
+    //send FrameEnd response to trigger screen redraw
     send_response(stream, MessageType::FrameEnd, &[])?;
     let total_ms = start_total.elapsed().as_millis();
     println!("Total: {}ms\n", total_ms);
@@ -189,6 +97,52 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
     // Save this frame for next delta comparison
     *prev_frame = rgba;
     Ok(())
+}
+
+//calculate how many pixel blocks have changed
+pub fn calculate_frame_changes(prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: &Vec<u8>) -> (Vec<u8>, u32, usize) {
+    //size of block that will be checked each loop
+    let block_size = 64;
+    let mut changed_pixels: usize = 0;
+    let mut frame_changes = Vec::new();
+    let mut rect_count = 0u32;
+
+    //loop through all blocks of block size in image and set height to either block size or less if at an edge
+    for by in (0..height).step_by(block_size) {
+        for bx in (0..width).step_by(block_size) {
+            let bw = block_size.min(width - bx);
+            let bh = block_size.min(height - by);
+
+            //if pixels in this block are different from the same block in the last image mark as changed
+            let mut changed = false;
+            'outer: for row in 0..bh {
+                let cur_off = ((by + row) * width + bx) * 4;
+                let prev_off = cur_off;
+                let len = bw * 4;
+                if &rgba[cur_off..cur_off + len] != &prev_frame[prev_off..prev_off + len] {
+                    changed = true;
+                    break 'outer;
+                }
+            }
+            //if block changed add block position, block size, and block data to frame_changes
+            if changed {
+                changed_pixels += bw * bh;
+                rect_count += 1;
+                frame_changes.extend_from_slice(&(bx as u32).to_be_bytes());
+                frame_changes.extend_from_slice(&(by as u32).to_be_bytes());
+                frame_changes.extend_from_slice(&(bw as u32).to_be_bytes());
+                frame_changes.extend_from_slice(&(bh as u32).to_be_bytes());
+            
+                for row in 0..bh {
+                    let start = ((by + row) * width + bx) * 4;
+                    let end = start + bw * 4;
+                    frame_changes.extend_from_slice(&rgba[start..end]);
+                }
+            }
+        }
+    }
+    //return changed frames, how many blocks changed and how many pixels changed
+    (frame_changes, rect_count, changed_pixels)
 }
 
 pub fn handle_cursor_shape(payload: &[u8]) -> Result<(), Box<dyn Error>>  {

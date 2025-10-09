@@ -123,8 +123,9 @@ fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
             MessageType::Disconnect => message_type_handlers::handle_disconnect(&payload)?,
             MessageType::Error => message_type_handlers::handle_error(&payload)?,
 
-            MessageType::FrameFull => message_type_handlers::handle_frame_full(tls)?,
+            //MessageType::FrameFull => message_type_handlers::handle_frame_full(tls)?,
             //MessageType::FrameDelta => message_type_handlers::handle_frame_delta(tls)?,
+            MessageType::FrameFull => {}
             MessageType::FrameDelta => {}
             MessageType::FrameEnd => {}
             MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload)?,
