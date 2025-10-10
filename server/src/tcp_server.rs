@@ -4,6 +4,7 @@ use std::{
     sync::{ Arc }, 
     env,
     net::{ TcpListener, TcpStream, },
+    time::Instant,
 };
 use rustls::{ 
     ServerConfig, 
@@ -58,11 +59,11 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     compressor.compress(image, &mut output)?;
     let jpeg_data = output.as_ref().to_vec();
     send_response(&mut tls, MessageType::FrameFull, &jpeg_data)?;
-    println!("Sent initial full frame");
 
     let mut prev_frame = rgba;
 
     loop {
+        let loop_timer = Instant::now();
         let mut latest = None;
         while let Ok(frame) = rx.try_recv() {
             latest = Some(frame);
@@ -75,6 +76,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(16));
+        println!("Loop: {}ms", loop_timer.elapsed().as_millis());
     }
 
     dispatcher(&mut tls)?;

@@ -49,7 +49,7 @@ pub fn handle_frame_full<T: Write>(stream: &mut T, compressor: &mut Compressor, 
     //send reference of output buffer
     send_response(stream, MessageType::FrameFull, output.as_ref())?;
     let full_frame_ms = t2.elapsed().as_millis();
-    println!("Full frame: {}ms", full_frame_ms);
+    print!("Full frame: {}ms    ", full_frame_ms);
 
     Ok(())
 }
@@ -76,6 +76,8 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
         //if more than half the image changed handle it as a full frame change
         if change_ratio > 0.5 {
             handle_frame_full(stream, &mut compressor, &mut output, &rgba, width, height)?;
+            let total_ms = start_total.elapsed().as_millis();
+            println!("Total: {}ms", total_ms);
         //if less than half of the image changed handle it as delta change
         } else {
             let t3 = Instant::now();
@@ -86,13 +88,13 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
             let compressed = lz4_flex::compress_prepend_size(&payload);
             send_response(stream, MessageType::FrameDelta, &compressed)?;
             let delta_frame_ms = t3.elapsed().as_millis();
-            println!("Delta frame: {}ms", delta_frame_ms);
+            print!("Delta frame: {}ms   ", delta_frame_ms);
+            let total_ms = start_total.elapsed().as_millis();
+            println!("Total: {}ms", total_ms);
         }
     }
     //send FrameEnd response to trigger screen redraw
     send_response(stream, MessageType::FrameEnd, &[])?;
-    let total_ms = start_total.elapsed().as_millis();
-    println!("Total: {}ms\n", total_ms);
 
     // Save this frame for next delta comparison
     *prev_frame = rgba;
