@@ -87,7 +87,7 @@ pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
     let default_addr = "0.0.0.0:7878".to_string();
     //allow override of bind address with env var
     let bind_addr = env::var("SERVER_BIND").unwrap_or(default_addr);
-    let listener = TcpListener::bind("0.0.0.0:7878")?;
+    let listener = TcpListener::bind(&bind_addr)?;
     println!("Tcp server listening to {bind_addr}");
     //call handel_client on all clients that contact tcp adress
     for stream in listener.incoming() {
