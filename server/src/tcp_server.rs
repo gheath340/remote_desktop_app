@@ -157,6 +157,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
 
 //sends given message to server
 pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8]) -> Result<(), Box<dyn Error>> {
+    let send_response_timer = Instant::now();
     //get the byte value from msg_type
     let type_byte = msg_type.to_u8();
 
@@ -172,6 +173,7 @@ pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &
     if msg_type == MessageType::FrameEnd {
         stream.flush()?;
     }
+    println!("Send response: {}ms", send_response_timer.elapsed().as_millis());
 
     Ok(())
 }

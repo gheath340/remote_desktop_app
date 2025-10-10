@@ -77,7 +77,7 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
         if change_ratio > 0.5 {
             handle_frame_full(stream, &mut compressor, &mut output, &rgba, width, height)?;
             let total_ms = start_total.elapsed().as_millis();
-            println!("Total: {}ms", total_ms);
+            println!("Handle frame otal: {}ms", total_ms);
         //if less than half of the image changed handle it as delta change
         } else {
             let t3 = Instant::now();
@@ -90,7 +90,7 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
             let delta_frame_ms = t3.elapsed().as_millis();
             print!("Delta frame: {}ms   ", delta_frame_ms);
             let total_ms = start_total.elapsed().as_millis();
-            println!("Total: {}ms", total_ms);
+            println!("Handle frame total: {}ms", total_ms);
         }
     }
     //send FrameEnd response to trigger screen redraw
