@@ -1,11 +1,9 @@
-use std::net::{ 
-    TcpListener, 
-    TcpStream, 
-};
 use std::{ 
-    io::{ Read, Write, ErrorKind }, 
+    io::{ Read, Write, ErrorKind, }, 
     error::Error, 
     sync::{ Arc }, 
+    env,
+    net::{ TcpListener, TcpStream, },
 };
 use rustls::{ 
     ServerConfig, 
@@ -84,10 +82,13 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     Ok(())
 }
 
+//run SERVER_BIND=127.0.0.1:7878 cargo run -p server to start on localhost only
 pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
-    //create tcp listener
-    let listener = TcpListener::bind("127.0.0.1:7878")?;
-    println!("Tcp server listening to port 127.0.0.1:7878");
+    let default_addr = "0.0.0.0:7878".to_string();
+    //allow override of bind address with env var
+    let bind_addr = env::var("SERVER_BIND").unwrap_or(default_addr);
+    let listener = TcpListener::bind("0.0.0.0:7878")?;
+    println!("Tcp server listening to {bind_addr}");
     //call handel_client on all clients that contact tcp adress
     for stream in listener.incoming() {
         handle_client(stream?, tls_config.clone())?;
