@@ -82,7 +82,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     Ok(())
 }
 
-//run SERVER_BIND=127.0.0.1:7878 cargo run -p server to start on localhost only
+//run SERVER_BIND=127.0.0.1:7878 cargo run --release -p server to start on localhost only
 pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
     let default_addr = "0.0.0.0:7878".to_string();
     //allow override of bind address with env var
