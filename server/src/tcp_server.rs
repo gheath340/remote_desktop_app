@@ -62,11 +62,12 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
 
     let mut prev_frame = rgba;
 
+    let loop_timer = Instant::now();
     loop {
-        let loop_timer = Instant::now();
         let mut latest = None;
         while let Ok(frame) = rx.try_recv() {
             latest = Some(frame);
+            println!("Loop: {}ms", loop_timer.elapsed().as_millis());
         }
 
         if let Some((_, _, rgba)) = latest {
@@ -76,7 +77,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(16));
-        println!("Loop: {}ms", loop_timer.elapsed().as_millis());
     }
 
     dispatcher(&mut tls)?;
