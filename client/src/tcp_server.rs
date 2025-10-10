@@ -35,6 +35,9 @@ pub enum FrameUpdate {
     Delta(Vec<u8>),
 }
 
+//to run on local host SERVER_ADDR=127.0.0.1:7878 cargo run --release -p client
+//to run on vm at home comment out work_address and change connection_address to work_address.clone()
+//to run on vmat work comment out home_address and change connection_address to work_address.clone()
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //let home_address = "192.168.50.209:7878".to_string();
     let work_address = "10.176.7.73:7878".to_string();
@@ -116,7 +119,10 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
 
     //run eventloop to correctly handle everything
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
+        //*control_flow = ControlFlow::Wait;
+        *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16));
+
+     let pixel_render_timer = Instant::now();
 
         //handle all UserEvent types
         match event {
@@ -156,6 +162,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                 if let Err(e) = pixels.render() {
                     eprintln!("Render error: {e}");
                 }
+                println!("Pixel rendered: {}ms", pixel_render_timer.elapsed().as_millis());
                 frame_count += 1;
                 if last_frame.elapsed() >= Duration::from_secs(1) {
                     println!("FPS: {}", frame_count);
