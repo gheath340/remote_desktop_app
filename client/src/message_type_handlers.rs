@@ -24,27 +24,22 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
     Ok(())
 }
 
-pub fn handle_frame_full(payload: &[u8], pixels: &mut pixels::Pixels) -> Result<(), Box<dyn Error>> {
-    //load dimensions and image data from payload
-    let width = u32::from_be_bytes(payload[0..4].try_into().unwrap()) as usize;
-    let height = u32::from_be_bytes(payload[4..8].try_into().unwrap()) as usize;
-    let data = &payload[8..];
-   
+pub fn handle_frame_full(width: u32, height: u32, payload: &[u8], pixels: &mut pixels::Pixels) -> Result<(), Box<dyn Error>> {
     //get the window dimensions and frame
     let extent = pixels.texture().size();
     let frame = pixels.frame_mut();
 
-    if width != extent.width as usize || height != extent.height as usize {
+    if width != extent.width || height != extent.height {
         println!("Frame size {} {} does not match window size {} {}", width, height, extent.width, extent.height);
         return Ok(());
     }
 
-    if data.len() != width * height * 4 {
+    if payload.len() != (width as usize) * (height as usize) * 4 {
         return Err("FrameFull pixel data length mismatch".into());
     }
 
     //add image data to frame to display image
-    frame.copy_from_slice(data);
+    frame.copy_from_slice(payload);
     Ok(())
 }
 

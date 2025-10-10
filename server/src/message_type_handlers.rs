@@ -102,7 +102,7 @@ pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, wi
 //calculate how many pixel blocks have changed
 pub fn calculate_frame_changes(prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: &Vec<u8>) -> (Vec<u8>, u32, usize) {
     //size of block that will be checked each loop
-    let block_size = 64;
+    let block_size = 128;
     let mut changed_pixels: usize = 0;
     let mut frame_changes = Vec::new();
     let mut rect_count = 0u32;

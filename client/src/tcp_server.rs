@@ -2,10 +2,11 @@ use common::message_type::MessageType;
 use std::{ 
     process,
     net::TcpStream,
-    io::{ Write, Read, Cursor },
+    io::{ Write, Read, },
     error::Error,
     sync::{ Arc, mpsc },
     time::{ Instant, Duration },
+    env,
 };
 use rustls::{ 
     ClientConfig, 
@@ -21,9 +22,6 @@ use winit::{
 use pixels::{ SurfaceTexture, Pixels };
 use crate::{ message_type_handlers, };
 use lz4_flex::decompress_size_prepended;
-use image::io::Reader as ImageReader;
-use image::DynamicImage;
-use turbojpeg::{Decompressor, Image, PixelFormat};
 
 
  #[derive(Debug)]
@@ -33,13 +31,17 @@ pub enum UserEvent {
 }
 
 pub enum FrameUpdate {
-    Full(Vec<u8>),
+    Full{ w: u32, h: u32, bytes: Vec<u8> },
     Delta(Vec<u8>),
 }
 
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
-    //temp connection address
-    let connection_address = "127.0.0.1:7878";
+    //let home_address = "192.168.50.209:7878".to_string();
+    let work_address = "10.176.7.73:7878".to_string();
+    //allow for server address override by calling "SERVER_ADDR=<address> cargo run -p client"
+    let connection_address = env::var("SERVER_ADDR").unwrap_or(work_address.clone());
+    println!("Connecting to server at {}", connection_address);
+
 
     //create the UI, main thread loop
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
@@ -49,18 +51,22 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //create the transmitter and reciever for the mpsc channel(message queue) that carries messages of the type FrameUpdate
     let (channel_transmitter, channel_reciever) = mpsc::channel::<FrameUpdate>();
 
+    //let addr_str = connection_address.clone();
+
     //create thread for dispatcher
     std::thread::spawn(move || {
         //create tcp connection
-        let mut tcp = TcpStream::connect(connection_address)
+        let addr_str = connection_address.clone();
+        let mut tcp = TcpStream::connect(&addr_str)
             .unwrap_or_else(|e| {
                 eprintln!("Failed to create TCP connection: {e}");
                 process::exit(1);
             });
-        println!("Connected to {} via TCP", connection_address);
+            tcp.set_nodelay(true).expect("set_nodelay failed");
 
         //get hostname of server
-        let server_name = ServerName::try_from("localhost")
+        let server_name_str = addr_str.split(':').next().unwrap_or("localhost").to_string();
+        let server_name = ServerName::try_from(server_name_str)
             .unwrap_or_else(|e| {
                 eprintln!("Invalid server name: {e}");
                 process::exit(1);
@@ -80,18 +86,14 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     });
 
     //looping until the channel recieves a full frame update from dispatcher thread
-    let first_full_bytes = loop {
+    let (width, height, first_rgba) = loop {
         match channel_reciever.recv()? {
-            FrameUpdate::Full(bytes) => break bytes,
+            FrameUpdate::Full{ w, h, bytes } => break (w, h, bytes),
             FrameUpdate::Delta(_) => {
                 continue;
             }
         }
     };
-
-    //get image dimensions and image data
-    let width = u32::from_be_bytes(first_full_bytes[0..4].try_into().unwrap());
-    let height = u32::from_be_bytes(first_full_bytes[4..8].try_into().unwrap());
 
     //build window
     let window = WindowBuilder::new()
@@ -104,28 +106,34 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
 
     //put image into pixels to display on window
     {
-        message_type_handlers::handle_frame_full(&first_full_bytes, &mut pixels)?;
+        message_type_handlers::handle_frame_full(width, height, &first_rgba, &mut pixels)?;
         pixels.render().unwrap();
     }
 
+    //used for FPS calculation
     let mut last_frame = Instant::now();
     let mut frame_count = 0u32;
 
+    //run eventloop to correctly handle everything
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
+        //handle all UserEvent types
         match event {
+            //handle UserEven::NewUpdates
             Event::UserEvent(UserEvent::NewUpdate) => {
+                //check reciever for updates and send to the correct FrameUpdate
                 let mut got_any = false;
                 while let Ok(update) = channel_reciever.try_recv() {
                     match update {
-                        FrameUpdate::Full(bytes) => {
-                            if let Err(e) = message_type_handlers::handle_frame_full(&bytes, &mut pixels) {
+                        //call handle_frame_full when FrameUpdate::Full
+                        FrameUpdate::Full{w, h, bytes} => {
+                            if let Err(e) = message_type_handlers::handle_frame_full(w, h, &bytes, &mut pixels) {
                                 eprintln!("Frame full error: {e}");
                             }
                             got_any = true;
                         }
-                        //I dont want handle_frame_delta to actually change the window, i want it to hold the updates until FrameEnd is called
+                        //call handle_frame_delta when FrameUpdate::Delta
                         FrameUpdate::Delta(bytes) => {
                             if let Err(e) = message_type_handlers::handle_frame_delta(&bytes, &mut pixels) {
                                 eprintln!("Frame delta error: {e}");
@@ -134,6 +142,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                         }
                     }
                 }
+                //if got_any UserEvent::NewUpdate call for window redraw to apply changes
                 if got_any {
                     window.request_redraw();
                 }
@@ -142,7 +151,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             Event::UserEvent(UserEvent::Redraw) => {
                 window.request_redraw();
             }
-            //window.request_redraw() calls this
+            //window.request_redraw() calls this to redraw window
             Event::RedrawRequested(_) => {
                 if let Err(e) = pixels.render() {
                     eprintln!("Render error: {e}");
@@ -154,7 +163,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     last_frame = Instant::now();
                 }
             }
-
+            //handle WindowEvent::CloseRequested
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 _ => {}
@@ -165,6 +174,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
 }
 
 fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>) -> Result<(), Box<dyn Error>> {
+    //create decompressor outside of loop to not recreate one every time
     let mut decompressor = turbojpeg::Decompressor::new()?;
     loop{
         //create header and read data into header
@@ -199,32 +209,29 @@ fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<Fr
             MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
 
             MessageType::FrameFull => {
-                let start = Instant::now();
-
+                //inspect the jpeg header to get size without a full decode
                 let header = decompressor.read_header(&payload)?;
                 let w = header.width as usize;
                 let h = header.height as usize;
 
+                //allocate target buffer to accept rgba
                 let mut rgba = vec![0u8; w * h * 4];
-                let mut out = turbojpeg::Image {
-                    pixels: rgba.as_mut_slice(),
-                    width: w,
-                    pitch: w * 4,
-                    height: h,
-                    format: turbojpeg::PixelFormat::RGBA,
+                //tells the decoder how to handle the pixels
+                let out = turbojpeg::Image {
+                    pixels: rgba.as_mut_slice(), //mut slice pointing to rgba buffer
+                    width: w, //width of jpeg
+                    pitch: w * 4, //how many bytes per row(width * 4 for rgba)
+                    height: h, //height of jpeg
+                    format: turbojpeg::PixelFormat::RGBA, //the format you want the output to be
                 };
+                //decompresses right into rgba buffer
                 decompressor.decompress(&payload, out)?;
 
-                // re-wrap for your existing handler
-                let mut framed = Vec::with_capacity(8 + rgba.len());
-                framed.extend_from_slice(&(w as u32).to_be_bytes());
-                framed.extend_from_slice(&(h as u32).to_be_bytes());
-                framed.extend_from_slice(&rgba);
-
-                channel_transmitter.send(FrameUpdate::Full(framed)).ok();
+                channel_transmitter.send(FrameUpdate::Full{w: w as u32, h: h as u32, bytes: rgba}).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
             },
             MessageType::FrameDelta => {
+                //decompress image and send it to the UI event loop to be properly handled
                 let decompressed = decompress_size_prepended(&payload)?;
                 channel_transmitter.send(FrameUpdate::Delta(decompressed)).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
