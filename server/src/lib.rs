@@ -3,7 +3,6 @@ use std::error::Error;
 
 mod capture;
 pub use capture::start_sck_stream;
-mod sck;
 mod message_type_handlers;
 mod tcp_server;
 mod tls;

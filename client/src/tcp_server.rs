@@ -1,5 +1,5 @@
 use common::message_type::MessageType;
-use std::{ 
+use std::{
     process,
     net::TcpStream,
     io::{ Write, Read, },
@@ -8,13 +8,13 @@ use std::{
     time::{ Instant, Duration },
     env,
 };
-use rustls::{ 
-    ClientConfig, 
-    ClientConnection, 
-    Stream, 
+use rustls::{
+    ClientConfig,
+    ClientConnection,
+    Stream,
     pki_types::ServerName,
  };
-use winit::{ 
+use winit::{
     event_loop::{ EventLoopBuilder, ControlFlow, EventLoopProxy },
     event::{ Event, WindowEvent },
     window::WindowBuilder,
@@ -36,13 +36,15 @@ pub enum FrameUpdate {
 }
 
 //to run on local host SERVER_ADDR=127.0.0.1:7878 cargo run --release -p client
-//to run on vm at home comment out work_address and change connection_address to work_address.clone()
-//to run on vmat work comment out home_address and change connection_address to work_address.clone()
+//to run on vm at home comment out other _address vars  and change connection_address to vm_work_address.clone()
+//to run on vm at work comment out other _address vars  and change connection_address to vm_work_address.clone()
+//to run on desktop comment out other _address vars and change connection_address to home_desktop_address.clone()
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
-    //let home_address = "192.168.50.209:7878".to_string();
-    let work_address = "10.176.7.73:7878".to_string();
+    let home_desktop_address = "192.168.50.105:7878".to_string();
+    //let vm_home_address = "192.168.50.209:7878".to_string();
+    //let vm_work_address = "10.176.7.73:7878".to_string();
     //allow for server address override by calling "SERVER_ADDR=<address> cargo run -p client"
-    let connection_address = env::var("SERVER_ADDR").unwrap_or(work_address.clone());
+    let connection_address = env::var("SERVER_ADDR").unwrap_or(home_desktop_address.clone());
     println!("Connecting to server at {}", connection_address);
 
 
