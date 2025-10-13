@@ -35,6 +35,7 @@ pub enum FrameUpdate {
     Delta(Vec<u8>),
 }
 
+
 //to run on local host SERVER_ADDR=127.0.0.1:7878 cargo run --release -p client
 //to run on vm at home comment out other _address vars  and change connection_address to vm_work_address.clone()
 //to run on vm at work comment out other _address vars  and change connection_address to vm_work_address.clone()
@@ -54,7 +55,8 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     let proxy = event_loop.create_proxy();
 
     //create the transmitter and reciever for the mpsc channel(message queue) that carries messages of the type FrameUpdate
-    let (channel_transmitter, channel_reciever) = mpsc::channel::<FrameUpdate>();
+    let (frame_transmitter, frame_reciever) = mpsc::channel::<FrameUpdate>();
+    let (mouse_transmitter, mouse_reciever) = mpsc::channel();
 
     //let addr_str = connection_address.clone();
 
@@ -85,14 +87,14 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         //create a TLS stream
         let mut tls = Stream::new(&mut tls_connection, &mut tcp);
 
-        if let Err(e) = dispatcher(&mut tls, channel_transmitter, proxy) {
+        if let Err(e) = dispatcher(&mut tls, frame_transmitter, proxy) {
             eprintln!("Dispatcher error: {e}");
         }
     });
 
     //looping until the channel recieves a full frame update from dispatcher thread
     let (width, height, first_rgba) = loop {
-        match channel_reciever.recv()? {
+        match frame_reciever.recv()? {
             FrameUpdate::Full{ w, h, bytes } => break (w, h, bytes),
             FrameUpdate::Delta(_) => {
                 continue;
@@ -132,7 +134,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             Event::UserEvent(UserEvent::NewUpdate) => {
                 //check reciever for updates and send to the correct FrameUpdate
                 let mut got_any = false;
-                while let Ok(update) = channel_reciever.try_recv() {
+                while let Ok(update) = frame_reciever.try_recv() {
                     match update {
                         //call handle_frame_full when FrameUpdate::Full
                         FrameUpdate::Full{w, h, bytes} => {
@@ -182,7 +184,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     });
 }
 
-fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>) -> Result<(), Box<dyn Error>> {
+fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>) -> Result<(), Box<dyn Error>> {
     //create decompressor outside of loop to not recreate one every time
     let mut decompressor = turbojpeg::Decompressor::new()?;
     loop{
@@ -236,13 +238,13 @@ fn dispatcher<T: Read + Write>(tls: &mut T, channel_transmitter: mpsc::Sender<Fr
                 //decompresses right into rgba buffer
                 decompressor.decompress(&payload, out)?;
 
-                channel_transmitter.send(FrameUpdate::Full{w: w as u32, h: h as u32, bytes: rgba}).ok();
+                frame_transmitter.send(FrameUpdate::Full{w: w as u32, h: h as u32, bytes: rgba}).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
             },
             MessageType::FrameDelta => {
                 //decompress image and send it to the UI event loop to be properly handled
                 let decompressed = decompress_size_prepended(&payload)?;
-                channel_transmitter.send(FrameUpdate::Delta(decompressed)).ok();
+                frame_transmitter.send(FrameUpdate::Delta(decompressed)).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
             }
             MessageType::FrameEnd => {

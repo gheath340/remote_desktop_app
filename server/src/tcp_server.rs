@@ -1,20 +1,20 @@
-use std::{ 
-    io::{ Read, Write, ErrorKind, }, 
-    error::Error, 
-    sync::{ Arc }, 
+use std::{
+    io::{ Read, Write, ErrorKind, },
+    error::Error,
+    sync::{ Arc },
     env,
     net::{ TcpListener, TcpStream, },
     time::Instant,
 };
-use rustls::{ 
-    ServerConfig, 
-    ServerConnection, 
-    Stream, 
+use rustls::{
+    ServerConfig,
+    ServerConnection,
+    Stream,
 };
-use turbojpeg::{ Compressor, 
-    Image, 
-    PixelFormat, 
-    Subsamp, 
+use turbojpeg::{ Compressor,
+    Image,
+    PixelFormat,
+    Subsamp,
     OutputBuf,
 };
 use common::message_type::MessageType;
@@ -22,7 +22,8 @@ use crate::message_type_handlers;
 //use crate::sck::start_sck_stream;
 use crate::capture::start_sck_stream;
 
-
+//TO RUN YDOTOOLD(to allow for mouse and keyboard input) run "~/bin/ydotool_session.sh" in empty terminal window
+//run "sudo pkill -f ydotoold" to stop ydotoold
 fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn std::error::Error>> {
     tcp.set_nodelay(true).expect("set_nodelay failed");
     // --- Create TLS stream ---
@@ -36,7 +37,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     println!("ScreenCaptureKit capture started…");
 
     // --- Wait for first frame ---
-    let (width, height, rgba) = rx.recv()?; 
+    let (width, height, rgba) = rx.recv()?;
     println!("Got first frame from ScreenCaptureKit");
 
     let mut rgb = Vec::with_capacity(width * height * 3);
