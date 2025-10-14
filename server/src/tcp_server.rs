@@ -22,7 +22,6 @@ use turbojpeg::{ Compressor,
 };
 use common::message_type::MessageType;
 use crate::message_type_handlers;
-//use crate::sck::start_sck_stream;
 use crate::capture::start_sck_stream;
 
 //TO RUN YDOTOOLD(to allow for mouse and keyboard input) run "~/bin/ydotool_session.sh" in empty terminal window
@@ -100,7 +99,6 @@ pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
 }
 
 //takes info from client and dispatches to correct MessageType handler
-//NOW IMPLEMENTING THE NEW STRUCTURE INTO THE DISPATCHER
 fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(MessageType, Vec<u8>)>) -> Result<(), Box<dyn Error>> {
         loop {
         // --- Send any pending frames ---

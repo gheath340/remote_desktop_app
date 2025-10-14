@@ -149,6 +149,7 @@ pub fn handle_frame_delta_test(prev_frame: &mut Vec<u8>, width: usize, height: u
             let (msg_type, payload) = handle_frame_full_test(&mut compressor, &mut output, &rgba, width, height)?;
             let total_ms = start_total.elapsed().as_millis();
             println!("Handle frame otal: {}ms", total_ms);
+            *prev_frame = rgba;
             return Ok((msg_type, payload));
         //if less than half of the image changed handle it as delta change
         } else {
@@ -162,11 +163,10 @@ pub fn handle_frame_delta_test(prev_frame: &mut Vec<u8>, width: usize, height: u
             print!("Delta frame: {}ms   ", delta_frame_ms);
             let total_ms = start_total.elapsed().as_millis();
             println!("Handle frame total: {}ms", total_ms);
+            *prev_frame = rgba;
             return Ok((MessageType::FrameDelta, compressed));
         }
     }
-    //send FrameEnd response to trigger screen redraw
-    //send_response(stream, MessageType::FrameEnd, &[])?;
 
     // Save this frame for next delta comparison
     *prev_frame = rgba;
