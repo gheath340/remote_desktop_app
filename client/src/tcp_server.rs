@@ -35,6 +35,21 @@ pub enum FrameUpdate {
     Delta(Vec<u8>),
 }
 
+fn make_mouse_move_packet(x: u32, y: u32) -> Vec<u8> {
+    let mut packet = Vec::with_capacity(1 + 4 + 8);
+
+    // 1 byte: message type
+    packet.push(MessageType::MouseMove.to_u8());
+
+    // 4 bytes: payload length (always 8 for two u32s)
+    packet.extend_from_slice(&8u32.to_be_bytes());
+
+    // 8 bytes: payload (x, y coordinates)
+    packet.extend_from_slice(&x.to_be_bytes());
+    packet.extend_from_slice(&y.to_be_bytes());
+
+    packet
+}
 
 //to run on local host SERVER_ADDR=127.0.0.1:7878 cargo run --release -p client
 //to run on vm at home comment out other _address vars  and change connection_address to vm_work_address.clone()
@@ -55,8 +70,8 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     let proxy = event_loop.create_proxy();
 
     //create the transmitter and reciever for the mpsc channel(message queue) that carries messages of the type FrameUpdate
-    let (frame_transmitter, frame_reciever) = mpsc::channel::<FrameUpdate>();
-    let (mouse_transmitter, mouse_reciever) = mpsc::channel();
+    let (frame_transmitter, frame_receiver) = mpsc::channel::<FrameUpdate>();
+    let (mouse_transmitter, mouse_receiver) = mpsc::channel::<Vec<u8>>();
 
     //let addr_str = connection_address.clone();
 
@@ -87,14 +102,14 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         //create a TLS stream
         let mut tls = Stream::new(&mut tls_connection, &mut tcp);
 
-        if let Err(e) = dispatcher(&mut tls, frame_transmitter, proxy) {
+        if let Err(e) = dispatcher(&mut tls, frame_transmitter, proxy, mouse_receiver) {
             eprintln!("Dispatcher error: {e}");
         }
     });
 
     //looping until the channel recieves a full frame update from dispatcher thread
     let (width, height, first_rgba) = loop {
-        match frame_reciever.recv()? {
+        match frame_receiver.recv()? {
             FrameUpdate::Full{ w, h, bytes } => break (w, h, bytes),
             FrameUpdate::Delta(_) => {
                 continue;
@@ -134,7 +149,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             Event::UserEvent(UserEvent::NewUpdate) => {
                 //check reciever for updates and send to the correct FrameUpdate
                 let mut got_any = false;
-                while let Ok(update) = frame_reciever.try_recv() {
+                while let Ok(update) = frame_receiver.try_recv() {
                     match update {
                         //call handle_frame_full when FrameUpdate::Full
                         FrameUpdate::Full{w, h, bytes} => {
@@ -177,6 +192,26 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             //handle WindowEvent::CloseRequested
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                
+                //handle cursor being moved
+                WindowEvent::CursorMoved { position, .. } => {
+                    //get window size
+                    let win_size = window.inner_size();
+                    let win_w = win_size.width as f64;
+                    let win_h = win_size.height as f64;
+
+                    //get remote screen dimensions
+                    let sx = ((position.x / win_w) * width as f64)
+                        .round()
+                        .clamp(0.0, (width - 1) as f64) as u32;
+                    let sy = ((position.y / win_h) * height as f64)
+                        .round()
+                        .clamp(0.0, (height - 1) as f64) as u32;
+
+                    //build packet and send it
+                    let packet = make_mouse_move_packet(sx, sy);
+                    let _ = mouse_transmitter.send(packet);
+                },
                 _ => {}
             },
             _ => {}
@@ -184,10 +219,15 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     });
 }
 
-fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>) -> Result<(), Box<dyn Error>> {
+fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>, mouse_receiver: mpsc::Receiver<Vec<u8>>) -> Result<(), Box<dyn Error>> {
     //create decompressor outside of loop to not recreate one every time
     let mut decompressor = turbojpeg::Decompressor::new()?;
     loop{
+
+        while let Ok(packet) = mouse_receiver.try_recv() {
+            tls.write_all(&packet)?;
+            tls.flush()?;
+        }
         //create header and read data into header
         let mut header = [0u8; 5];
         tls.read_exact(&mut header)?;
