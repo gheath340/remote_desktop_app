@@ -4,7 +4,7 @@ use std::{
     sync::{ Arc },
     env,
     net::{ TcpListener, TcpStream, },
-    time::Instant,
+    time::{ Instant, Duration },
     thread,
     sync::{ mpsc, },
 };
@@ -30,10 +30,11 @@ use crate::capture::start_sck_stream;
 fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn std::error::Error>> {
     tcp.set_nodelay(true).expect("set_nodelay failed");
     // --- Create TLS stream ---
+    tcp.set_nonblocking(true)?;
     let mut tls_conn = ServerConnection::new(tls_config.clone())?;
     let tls = StreamOwned::new(tls_conn, tcp);
 
-    println!("New connection: {:#?}", tls);
+    println!("New client connection");
 
     let (frame_transmitter, frame_receiver) = std::sync::mpsc::channel::<(MessageType, Vec<u8>)>();
 
@@ -71,7 +72,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
                 rgba,
             ) {
                 Ok((msg_type, payload)) => {
-                    frame_transmitter.send((msg_type, payload)).ok();
+                    frame_transmitter.send((msg_type, payload))?;
                 }
                 Err(e) => eprintln!("Frame processing error: {e}"),
             }
@@ -81,54 +82,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
 
         thread::sleep(std::time::Duration::from_millis(16));
     }
-
-    // // --- Wait for first frame ---
-    // let (width, height, rgba) = rx.recv()?;
-    // println!("Got first frame from ScreenCaptureKit");
-
-    // let mut rgb = Vec::with_capacity(width * height * 3);
-    // for chunk in rgba.chunks_exact(4) {
-    //     rgb.extend_from_slice(&chunk[..3]);
-    // }
-    // let image = Image {
-    //     pixels: rgb.as_slice(),
-    //     width,
-    //     pitch: width * 3, // bytes per row
-    //     height,
-    //     format: PixelFormat::RGB,
-    // };
-    // // Create compressor + output buffer
-    // let mut compressor = Compressor::new()?;
-    // let _ = compressor.set_subsamp(Subsamp::Sub2x2);
-    // let _ = compressor.set_quality(80);
-    // let mut output = OutputBuf::new_owned();
-    // // Compress
-    // compressor.compress(image, &mut output)?;
-    // let jpeg_data = output.as_ref().to_vec();
-    // //NOT GOING TO WORK, CANT HAVE TLS STREAM HERE
-    // //
-    // send_response(&mut tls, MessageType::FrameFull, &jpeg_data)?;
-
-    // let mut prev_frame = rgba;
-
-    // let loop_timer = Instant::now();
-    // loop {
-    //     let mut latest = None;
-    //     while let Ok(frame) = rx.try_recv() {
-    //         latest = Some(frame);
-    //         println!("Loop: {}ms", loop_timer.elapsed().as_millis());
-    //     }
-
-    //     if let Some((_, _, rgba)) = latest {
-    //         if let Err(e) = message_type_handlers::handle_frame_delta(&mut tls, &mut prev_frame, width, height, rgba) {
-    //             eprintln!("Stream error: {e}");
-    //             break;
-    //         }
-    //     }
-    //     std::thread::sleep(std::time::Duration::from_millis(16));
-    // }
-
-    //dispatcher(&mut tls)?;
 }
 
 //to run on local host SERVER_BIND=127.0.0.1:7878 cargo run --release -p server
@@ -149,57 +102,66 @@ pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
 //takes info from client and dispatches to correct MessageType handler
 //NOW IMPLEMENTING THE NEW STRUCTURE INTO THE DISPATCHER
 fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(MessageType, Vec<u8>)>) -> Result<(), Box<dyn Error>> {
-    loop{
-        //create header and read data into header
+        loop {
+        // --- Send any pending frames ---
+        while let Ok((msg_type, payload)) = frame_receiver.try_recv() {
+            send_response(tls, msg_type, &payload)?;
+        }
+
+        // --- Try to read incoming messages ---
         let mut header = [0u8; 5];
-        if let Err(e) = tls.read_exact(&mut header) {
-            if e.kind() == ErrorKind::UnexpectedEof {
+        match tls.read_exact(&mut header) {
+            Ok(_) => {
+                let msg_type = MessageType::from_u8(header[0]);
+                let payload_len =
+                    u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
+                let mut payload = vec![0u8; payload_len as usize];
+                tls.read_exact(&mut payload)?;
+
+                match msg_type {
+                    MessageType::Text => message_type_handlers::handle_text(&payload)?,
+                    MessageType::Connect => message_type_handlers::handle_connect(&payload)?,
+                    MessageType::Disconnect => message_type_handlers::handle_disconnect(&payload)?,
+                    MessageType::Error => message_type_handlers::handle_error(&payload)?,
+
+                    //MessageType::FrameFull => message_type_handlers::handle_frame_full(tls)?,
+                    //MessageType::FrameDelta => message_type_handlers::handle_frame_delta(tls)?,
+                    MessageType::FrameFull => {}
+                    MessageType::FrameDelta => {}
+                    MessageType::FrameEnd => {}
+                    MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload)?,
+                    MessageType::CursorPos => message_type_handlers::handle_cursor_pos(&payload)?,
+                    MessageType::Resize => message_type_handlers::handle_resize(&payload)?,
+
+                    MessageType::KeyDown => message_type_handlers::handle_key_down(&payload)?,
+                    MessageType::KeyUp => message_type_handlers::handle_key_up(&payload)?,
+                    MessageType::MouseMove => message_type_handlers::handle_mouse_move(&payload)?,
+                    MessageType::MouseDown => message_type_handlers::handle_mouse_down(&payload)?,
+                    MessageType::MouseUp => message_type_handlers::handle_mouse_up(&payload)?,
+                    MessageType::MouseScroll => message_type_handlers::handle_mouse_scroll(&payload)?,
+
+                    MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
+
+
+                    MessageType::Unknown(code) => {
+                        println!("Unknown message type: {code:#X}, skipping {payload_len} bytes");
+                    }
+                }
+            }
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                // No data available right now; just continue loop.
+            }
+            Err(ref e) if e.kind() == ErrorKind::UnexpectedEof => {
                 println!("Client disconnected");
                 break;
-            } else {
-                return Err(Box::new(e));
             }
+            Err(e) => return Err(Box::new(e)),
         }
 
-        //parse message type and payload_len from header
-        let msg_type = MessageType::from_u8(header[0]);
-        let payload_len = u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
-
-        //create empty vec that is the appropriate length for payload and fill it wih payload
-        let mut payload = vec![0u8; payload_len as usize];
-        tls.read_exact(&mut payload)?;
-
-        //dispatch payload to correct handler
-        match msg_type {
-            MessageType::Text => message_type_handlers::handle_text(&payload)?,
-            MessageType::Connect => message_type_handlers::handle_connect(&payload)?,
-            MessageType::Disconnect => message_type_handlers::handle_disconnect(&payload)?,
-            MessageType::Error => message_type_handlers::handle_error(&payload)?,
-
-            //MessageType::FrameFull => message_type_handlers::handle_frame_full(tls)?,
-            //MessageType::FrameDelta => message_type_handlers::handle_frame_delta(tls)?,
-            MessageType::FrameFull => {}
-            MessageType::FrameDelta => {}
-            MessageType::FrameEnd => {}
-            MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload)?,
-            MessageType::CursorPos => message_type_handlers::handle_cursor_pos(&payload)?,
-            MessageType::Resize => message_type_handlers::handle_resize(&payload)?,
-
-            MessageType::KeyDown => message_type_handlers::handle_key_down(&payload)?,
-            MessageType::KeyUp => message_type_handlers::handle_key_up(&payload)?,
-            MessageType::MouseMove => message_type_handlers::handle_mouse_move(&payload)?,
-            MessageType::MouseDown => message_type_handlers::handle_mouse_down(&payload)?,
-            MessageType::MouseUp => message_type_handlers::handle_mouse_up(&payload)?,
-            MessageType::MouseScroll => message_type_handlers::handle_mouse_scroll(&payload)?,
-
-            MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
-
-
-            MessageType::Unknown(code) => {
-                println!("Unknown message type: {code:#X}, skipping {payload_len} bytes");
-            }
-        }
+        // Avoid pegging a CPU core
+        std::thread::sleep(Duration::from_millis(1));
     }
+
     Ok(())
 }
 
