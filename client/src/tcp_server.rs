@@ -51,6 +51,24 @@ fn make_mouse_move_packet(x: u32, y: u32) -> Vec<u8> {
     packet
 }
 
+fn calculate_viewport(win_w: u32, win_h: u32, frame_w: u32, frame_h: u32,) -> (u32, u32) {
+    let aspect_frame = frame_w as f32 / frame_h as f32;
+    let aspect_window = win_w as f32 / win_h as f32;
+
+    if aspect_window > aspect_frame {
+        // window is wider than frame, pillarbox horizontally
+        let h = win_h;
+        let w = (h as f32 * aspect_frame) as u32;
+        return (w, h);
+    } else {
+        // window is taller than frame, letterbox vertically
+        let w = win_w;
+        let h = (w as f32 / aspect_frame) as u32;
+        return (w, h);
+    };
+}
+
+
 //to run on local host SERVER_ADDR=127.0.0.1:7878 cargo run --release -p client
 //to run on vm at home comment out other _address vars  and change connection_address to vm_work_address.clone()
 //to run on vm at work comment out other _address vars  and change connection_address to vm_work_address.clone()
@@ -62,7 +80,6 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //allow for server address override by calling "SERVER_ADDR=<address> cargo run -p client"
     let connection_address = env::var("SERVER_ADDR").unwrap_or(home_desktop_address.clone());
     println!("Connecting to server at {}", connection_address);
-
 
     //create the UI, main thread loop
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
@@ -123,7 +140,8 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         .build(&event_loop)?;
 
     //create surface and attatch pixels to it
-    let surface_texture = SurfaceTexture::new(width, height, &window);
+    let win_size = window.inner_size();
+    let surface_texture = SurfaceTexture::new(win_size.width, win_size.height, &window);
     let mut pixels = Pixels::new(width, height, surface_texture)?;
 
     //put image into pixels to display on window
@@ -178,9 +196,32 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             }
             //window.request_redraw() calls this to redraw window
             Event::RedrawRequested(_) => {
-                if let Err(e) = pixels.render() {
-                    eprintln!("Render error: {e}");
+                {
+                    let frame = pixels.frame_mut();
+                    for chunk in frame.chunks_exact_mut(4) {
+                        chunk.copy_from_slice(&[0, 0, 0, 255]);
+                    }
                 }
+
+                // Get window size and calculate the centered viewport
+                let win_size = window.inner_size();
+                let (vw, vh) = calculate_viewport(win_size.width, win_size.height, width, height);
+
+                // Apply centering offset
+                pixels
+                    .resize_surface(vw, vh)
+                    .unwrap_or_else(|e| eprintln!("Resize surface error: {e}"));
+                pixels
+                    .resize_buffer(vw, vh)
+                    .unwrap_or_else(|e| eprintln!("Resize buffer error: {e}"));
+                pixels
+                    .render_with(|encoder, render_target, context| {
+                        context.scaling_renderer.render(encoder, render_target);
+                        Ok(())
+                    })
+                    .unwrap_or_else(|e| eprintln!("Render error: {e}"));
+
+                // FPS counter and frame time logs
                 println!("Pixel rendered: {}ms", pixel_render_timer.elapsed().as_millis());
                 frame_count += 1;
                 if last_frame.elapsed() >= Duration::from_secs(1) {
@@ -188,6 +229,16 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     frame_count = 0;
                     last_frame = Instant::now();
                 }
+                // if let Err(e) = pixels.render() {
+                //     eprintln!("Render error: {e}");
+                // }
+                // println!("Pixel rendered: {}ms", pixel_render_timer.elapsed().as_millis());
+                // frame_count += 1;
+                // if last_frame.elapsed() >= Duration::from_secs(1) {
+                //     println!("FPS: {}", frame_count);
+                //     frame_count = 0;
+                //     last_frame = Instant::now();
+                // }
             }
             Event::WindowEvent { event, .. } => match event {
                 //handle window close
@@ -212,6 +263,16 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     let packet = make_mouse_move_packet(sx, sy);
                     let _ = mouse_transmitter.send(packet);
                 },
+                WindowEvent::Resized(size) => {
+                    let (vw, vh) = calculate_viewport(size.width, size.height, width, height);
+                    pixels.resize_surface(vw, vh).unwrap();
+                    window.request_redraw();
+                },
+                WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                    let (vw, vh) = calculate_viewport(new_inner_size.width, new_inner_size.height, width, height);
+                    pixels.resize_surface(vw, vh).unwrap();
+                    window.request_redraw();
+                }
                 _ => {}
             },
             _ => {}
