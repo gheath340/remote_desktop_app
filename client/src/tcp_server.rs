@@ -189,10 +189,10 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     last_frame = Instant::now();
                 }
             }
-            //handle WindowEvent::CloseRequested
             Event::WindowEvent { event, .. } => match event {
+                //handle window close
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                
+
                 //handle cursor being moved
                 WindowEvent::CursorMoved { position, .. } => {
                     //get window size
@@ -225,6 +225,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
     loop{
 
         while let Ok(packet) = mouse_receiver.try_recv() {
+            println!("Sending mouse packet of length {}", packet.len());
             tls.write_all(&packet)?;
             tls.flush()?;
         }
