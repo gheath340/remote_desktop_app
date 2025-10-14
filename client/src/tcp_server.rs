@@ -226,7 +226,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
 
         while let Ok(packet) = mouse_receiver.try_recv() {
             println!("Sending mouse packet of length {}", packet.len());
-            tls.write_all(&packet[0])?;
+            tls.write_all(&[packet[0]])?;
             tls.write_all(&packet[1..5])?;
             tls.write_all(&packet[5..])?;
             tls.flush()?;
