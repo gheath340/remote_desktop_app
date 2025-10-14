@@ -5,11 +5,14 @@ use std::{
     env,
     net::{ TcpListener, TcpStream, },
     time::Instant,
+    thread,
+    sync::{ mpsc, },
 };
 use rustls::{
     ServerConfig,
     ServerConnection,
     Stream,
+    StreamOwned
 };
 use turbojpeg::{ Compressor,
     Image,
@@ -28,61 +31,104 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     tcp.set_nodelay(true).expect("set_nodelay failed");
     // --- Create TLS stream ---
     let mut tls_conn = ServerConnection::new(tls_config.clone())?;
-    let mut tls = Stream::new(&mut tls_conn, &mut tcp);
+    let tls = StreamOwned::new(tls_conn, tcp);
 
     println!("New connection: {:#?}", tls);
+
+    let (frame_transmitter, frame_receiver) = std::sync::mpsc::channel::<(MessageType, Vec<u8>)>();
+
+    //new dispatcher thread
+    std::thread::spawn(move || {
+    // this thread owns the TLS stream
+    let mut tls = tls;
+    if let Err(e) = dispatcher(&mut tls, frame_receiver) {
+        eprintln!("Dispatcher thread error: {e}");
+    }
+    });
 
     // --- Start ScreenCaptureKit capture ---
     let rx = start_sck_stream();
     println!("ScreenCaptureKit capture started…");
 
-    // --- Wait for first frame ---
-    let (width, height, rgba) = rx.recv()?;
-    println!("Got first frame from ScreenCaptureKit");
+    let (width, height, _) = rx.recv()?; // just grab first frame for dimensions
+    let mut prev_frame = vec![0u8; width * height * 4];
 
-    let mut rgb = Vec::with_capacity(width * height * 3);
-    for chunk in rgba.chunks_exact(4) {
-        rgb.extend_from_slice(&chunk[..3]);
-    }
-    let image = Image {
-        pixels: rgb.as_slice(),
-        width,
-        pitch: width * 3, // bytes per row
-        height,
-        format: PixelFormat::RGB,
-    };
-    // Create compressor + output buffer
-    let mut compressor = Compressor::new()?;
-    let _ = compressor.set_subsamp(Subsamp::Sub2x2);
-    let _ = compressor.set_quality(80);
-    let mut output = OutputBuf::new_owned();
-    // Compress
-    compressor.compress(image, &mut output)?;
-    let jpeg_data = output.as_ref().to_vec();
-    send_response(&mut tls, MessageType::FrameFull, &jpeg_data)?;
-
-    let mut prev_frame = rgba;
-
-    let loop_timer = Instant::now();
     loop {
+        let loop_timer = Instant::now();
         let mut latest = None;
+
+        // drain the capture channel and keep only the latest frame
         while let Ok(frame) = rx.try_recv() {
             latest = Some(frame);
-            println!("Loop: {}ms", loop_timer.elapsed().as_millis());
         }
 
         if let Some((_, _, rgba)) = latest {
-            if let Err(e) = message_type_handlers::handle_frame_delta(&mut tls, &mut prev_frame, width, height, rgba) {
-                eprintln!("Stream error: {e}");
-                break;
+            // offline delta generation — this version just returns Vec<u8>
+            match message_type_handlers::handle_frame_delta_test(
+                &mut prev_frame,
+                width,
+                height,
+                rgba,
+            ) {
+                Ok((msg_type, payload)) => {
+                    frame_transmitter.send((msg_type, payload)).ok();
+                }
+                Err(e) => eprintln!("Frame processing error: {e}"),
             }
+
+            println!("Frame loop time: {}ms", loop_timer.elapsed().as_millis());
         }
-        std::thread::sleep(std::time::Duration::from_millis(16));
+
+        thread::sleep(std::time::Duration::from_millis(16));
     }
 
-    dispatcher(&mut tls)?;
+    // // --- Wait for first frame ---
+    // let (width, height, rgba) = rx.recv()?;
+    // println!("Got first frame from ScreenCaptureKit");
 
-    Ok(())
+    // let mut rgb = Vec::with_capacity(width * height * 3);
+    // for chunk in rgba.chunks_exact(4) {
+    //     rgb.extend_from_slice(&chunk[..3]);
+    // }
+    // let image = Image {
+    //     pixels: rgb.as_slice(),
+    //     width,
+    //     pitch: width * 3, // bytes per row
+    //     height,
+    //     format: PixelFormat::RGB,
+    // };
+    // // Create compressor + output buffer
+    // let mut compressor = Compressor::new()?;
+    // let _ = compressor.set_subsamp(Subsamp::Sub2x2);
+    // let _ = compressor.set_quality(80);
+    // let mut output = OutputBuf::new_owned();
+    // // Compress
+    // compressor.compress(image, &mut output)?;
+    // let jpeg_data = output.as_ref().to_vec();
+    // //NOT GOING TO WORK, CANT HAVE TLS STREAM HERE
+    // //
+    // send_response(&mut tls, MessageType::FrameFull, &jpeg_data)?;
+
+    // let mut prev_frame = rgba;
+
+    // let loop_timer = Instant::now();
+    // loop {
+    //     let mut latest = None;
+    //     while let Ok(frame) = rx.try_recv() {
+    //         latest = Some(frame);
+    //         println!("Loop: {}ms", loop_timer.elapsed().as_millis());
+    //     }
+
+    //     if let Some((_, _, rgba)) = latest {
+    //         if let Err(e) = message_type_handlers::handle_frame_delta(&mut tls, &mut prev_frame, width, height, rgba) {
+    //             eprintln!("Stream error: {e}");
+    //             break;
+    //         }
+    //     }
+    //     std::thread::sleep(std::time::Duration::from_millis(16));
+    // }
+
+    //dispatcher(&mut tls)?;
 }
 
 //to run on local host SERVER_BIND=127.0.0.1:7878 cargo run --release -p server
@@ -101,7 +147,8 @@ pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
 }
 
 //takes info from client and dispatches to correct MessageType handler
-fn dispatcher<T: Read + Write>(tls: &mut T) -> Result<(), Box<dyn Error>> {
+//NOW IMPLEMENTING THE NEW STRUCTURE INTO THE DISPATCHER
+fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(MessageType, Vec<u8>)>) -> Result<(), Box<dyn Error>> {
     loop{
         //create header and read data into header
         let mut header = [0u8; 5];
