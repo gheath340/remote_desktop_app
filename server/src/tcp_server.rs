@@ -27,9 +27,9 @@ use crate::capture::start_sck_stream;
 //TO RUN YDOTOOLD(to allow for mouse and keyboard input) run "~/bin/ydotool_session.sh" in empty terminal window
 //run "sudo pkill -f ydotoold" to stop ydotoold
 fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn std::error::Error>> {
-    tcp.set_nodelay(true).expect("set_nodelay failed");
-    // --- Create TLS stream ---
+    tcp.set_nodelay(true)?;
     tcp.set_nonblocking(true)?;
+    // --- Create TLS stream ---
     let mut tls_conn = ServerConnection::new(tls_config.clone())?;
     let tls = StreamOwned::new(tls_conn, tcp);
 
@@ -50,8 +50,32 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     let rx = start_sck_stream();
     println!("ScreenCaptureKit capture started…");
 
-    let (width, height, _) = rx.recv()?; // just grab first frame for dimensions
-    let mut prev_frame = vec![0u8; width * height * 4];
+    let (width, height, first_rgba) = rx.recv()?;
+
+    // Send that as the initial full frame
+    {
+        let mut compressor = Compressor::new()?;
+        compressor.set_subsamp(Subsamp::Sub2x2)?;
+        compressor.set_quality(80)?;
+        let mut output = OutputBuf::new_owned();
+
+        let image = Image {
+            pixels: first_rgba.as_slice(),
+            width,
+            pitch: width * 4,
+            height,
+            format: PixelFormat::RGBA,
+        };
+        compressor.compress(image, &mut output)?;
+        let jpeg = output.as_ref().to_vec();
+
+        // Kickstart the client: Full frame + FrameEnd (FrameEnd also forces a flush on your send_response)
+        frame_transmitter.send((MessageType::FrameFull, jpeg))?;
+        frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
+    }
+
+    // Initialize prev_frame with the first frame so deltas work
+    let mut prev_frame = first_rgba;
 
     loop {
         let loop_timer = Instant::now();
@@ -72,6 +96,8 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             ) {
                 Ok((msg_type, payload)) => {
                     frame_transmitter.send((msg_type, payload))?;
+                    frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
+
                 }
                 Err(e) => eprintln!("Frame processing error: {e}"),
             }
@@ -147,7 +173,8 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
                 }
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                // No data available right now; just continue loop.
+                std::thread::sleep(Duration::from_millis(2));
+                continue;
             }
             Err(ref e) if e.kind() == ErrorKind::UnexpectedEof => {
                 println!("Client disconnected");
