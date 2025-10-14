@@ -64,7 +64,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
 
         if let Some((_, _, rgba)) = latest {
             // offline delta generation — this version just returns Vec<u8>
-            match message_type_handlers::handle_frame_delta_test(
+            match message_type_handlers::handle_frame_delta(
                 &mut prev_frame,
                 width,
                 height,
