@@ -31,77 +31,6 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
     Ok(())
 }
 
-// pub fn handle_frame_full<T: Write>(stream: &mut T, compressor: &mut Compressor, output: &mut OutputBuf, rgba: &Vec<u8>, width: usize, height: usize) -> Result<(), Box<dyn Error>> {
-//     let t2 = Instant::now();
-
-//     //create image and tell decoder how to handle image
-//     let image = Image {
-//                 pixels: rgba.as_slice(), //mut slice pointing to rgba buffer
-//                 width: width, //width of jpeg
-//                 pitch: width * 4, //how many bytes per row(width * 4 for rgba)
-//                 height: height, //height of jpeg
-//                 format: PixelFormat::RGBA, //the format you want the output to be
-//             };
-
-//     // Compress image into output buffer
-//     compressor.compress(image, output)?;
-
-//     //send reference of output buffer
-//     send_response(stream, MessageType::FrameFull, output.as_ref())?;
-//     let full_frame_ms = t2.elapsed().as_millis();
-//     print!("Full frame: {}ms    ", full_frame_ms);
-
-//     Ok(())
-// }
-
-// pub fn handle_frame_delta<T: Write>(stream: &mut T, prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: Vec<u8>) -> Result<(), Box<dyn Error>> {
-//     //start timer
-//     let start_total = Instant::now();
-
-//     // Create compressor + output buffer
-//     let mut compressor = Compressor::new()?;
-//     let _ = compressor.set_subsamp(Subsamp::Sub2x2);
-//     let _ = compressor.set_quality(80);
-//     let mut output = OutputBuf::new_owned();
-
-//     //get all frame changes, count of parts of screen that changed and amount of changed pixels
-//     let (frame_changes, rect_count, changed_pixels) = calculate_frame_changes(prev_frame, width, height, &rgba);
-
-//     //if there actually was a change
-//     if rect_count > 0 {
-//         //calculate how much of the image changed
-//         let total_pixels = width * height;
-//         let change_ratio = changed_pixels as f32 / total_pixels as f32;
-
-//         //if more than half the image changed handle it as a full frame change
-//         if change_ratio > 0.5 {
-//             handle_frame_full(stream, &mut compressor, &mut output, &rgba, width, height)?;
-//             let total_ms = start_total.elapsed().as_millis();
-//             println!("Handle frame otal: {}ms", total_ms);
-//         //if less than half of the image changed handle it as delta change
-//         } else {
-//             let t3 = Instant::now();
-//             let mut payload = Vec::with_capacity(4 + frame_changes.len());
-//             payload.extend_from_slice(&rect_count.to_be_bytes());
-//             payload.extend_from_slice(&frame_changes);
-
-//             let compressed = lz4_flex::compress_prepend_size(&payload);
-//             send_response(stream, MessageType::FrameDelta, &compressed)?;
-//             let delta_frame_ms = t3.elapsed().as_millis();
-//             print!("Delta frame: {}ms   ", delta_frame_ms);
-//             let total_ms = start_total.elapsed().as_millis();
-//             println!("Handle frame total: {}ms", total_ms);
-//         }
-//     }
-//     //send FrameEnd response to trigger screen redraw
-//     send_response(stream, MessageType::FrameEnd, &[])?;
-
-//     // Save this frame for next delta comparison
-//     *prev_frame = rgba;
-//     Ok(())
-// }
-
-
 pub fn handle_frame_full(compressor: &mut Compressor, output: &mut OutputBuf, rgba: &Vec<u8>, width: usize, height: usize) -> Result<(MessageType, Vec<u8>), Box<dyn Error>> {
     let t2 = Instant::now();
 
@@ -146,7 +75,7 @@ pub fn handle_frame_delta(prev_frame: &mut Vec<u8>, width: usize, height: usize,
 
         //if more than half the image changed handle it as a full frame change
         if change_ratio > 0.5 {
-            let (msg_type, payload) = handle_frame_full_test(&mut compressor, &mut output, &rgba, width, height)?;
+            let (msg_type, payload) = handle_frame_full(&mut compressor, &mut output, &rgba, width, height)?;
             let total_ms = start_total.elapsed().as_millis();
             println!("Handle frame otal: {}ms", total_ms);
             *prev_frame = rgba;
