@@ -1,14 +1,14 @@
-use std::{ 
-    io::{ Write }, 
-    error::Error, 
+use std::{
+    io::{ Write },
+    error::Error,
     time::Instant,
     process::{ Command, },
 };
 use crate::tcp_server::send_response;
 use common::message_type::MessageType;
-use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
-use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-use core_graphics::geometry::CGPoint;
+// use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+// use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+// use core_graphics::geometry::CGPoint;
 use turbojpeg::{Compressor, Image, PixelFormat, Subsamp, OutputBuf};
 
 pub fn handle_text(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
@@ -139,7 +139,7 @@ pub fn calculate_frame_changes(prev_frame: &mut Vec<u8>, width: usize, height: u
                 frame_changes.extend_from_slice(&(by as u32).to_be_bytes());
                 frame_changes.extend_from_slice(&(bw as u32).to_be_bytes());
                 frame_changes.extend_from_slice(&(bh as u32).to_be_bytes());
-            
+
                 for row in 0..bh {
                     let start = ((by + row) * width + bx) * 4;
                     let end = start + bw * 4;
@@ -163,23 +163,23 @@ pub fn handle_mouse_move(payload: &[u8]) -> Result<(), Box<dyn std::error::Error
     let y = u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
     println!("Mouse move: x={}, y={}", x, y);
 
-    let src = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-        .map_err(|_| "Failed to create CGEventSource")?;
+    // let src = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+    //     .map_err(|_| "Failed to create CGEventSource")?;
 
-    // ✅ Create event
-    let pos = CGPoint::new(x as f64, y as f64);
-    let move_event = CGEvent::new_mouse_event(src, CGEventType::MouseMoved, pos, CGMouseButton::Left)
-        .map_err(|_| "Failed to create CGEvent")?;
+    // //create event
+    // let pos = CGPoint::new(x as f64, y as f64);
+    // let move_event = CGEvent::new_mouse_event(src, CGEventType::MouseMoved, pos, CGMouseButton::Left)
+    //     .map_err(|_| "Failed to create CGEvent")?;
 
-    // ✅ Post it to the system
-    move_event.post(CGEventTapLocation::HID);
+    // //post it to the system
+    // move_event.post(CGEventTapLocation::HID);
 
-    // Call ydotool to actually move the cursor
-    // std::process::Command::new("ydotool")
-    //     .arg("mousemove")
-    //     .arg(x.to_string())
-    //     .arg(y.to_string())
-    //     .status()?;
+    //Call ydotool to actually move the cursor
+    std::process::Command::new("ydotool")
+        .arg("mousemove")
+        .arg(x.to_string())
+        .arg(y.to_string())
+        .status()?;
 
     Ok(())
 }
