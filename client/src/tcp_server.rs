@@ -22,6 +22,8 @@ use winit::{
 use pixels::{ SurfaceTexture, Pixels };
 use crate::{ message_type_handlers, };
 use lz4_flex::decompress_size_prepended;
+//use pixels::wgpu::SurfaceSize;
+use pixels::wgpu;
 
 
  #[derive(Debug)]
@@ -140,8 +142,9 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         .build(&event_loop)?;
 
     //create surface and attatch pixels to it
-    let win_size = window.inner_size();
-    let surface_texture = SurfaceTexture::new(win_size.width, win_size.height, &window);
+    // let win_size = window.inner_size();
+    // let surface_texture = SurfaceTexture::new(win_size.width, win_size.height, &window);
+    let surface_texture = SurfaceTexture::new(width, height, &window);
     let mut pixels = Pixels::new(width, height, surface_texture)?;
 
     //put image into pixels to display on window
@@ -196,49 +199,37 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             }
             //window.request_redraw() calls this to redraw window
             Event::RedrawRequested(_) => {
-                {
-                    let frame = pixels.frame_mut();
-                    for chunk in frame.chunks_exact_mut(4) {
-                        chunk.copy_from_slice(&[0, 0, 0, 255]);
-                    }
+                // Always resize the pixel surface to match window
+                let win_size = window.inner_size();
+
+                // This makes the frame scale to fill the window
+                if let Err(e) = pixels.resize_surface(win_size.width, win_size.height) {
+                    eprintln!("Resize surface error: {e}");
                 }
 
-                // Get window size and calculate the centered viewport
-                let win_size = window.inner_size();
-                let (vw, vh) = calculate_viewport(win_size.width, win_size.height, width, height);
+                // Draw the scaled frame
+                if let Err(e) = pixels.render() {
+                    eprintln!("Render error: {e}");
+                }
 
-                // Apply centering offset
-                pixels
-                    .resize_surface(vw, vh)
-                    .unwrap_or_else(|e| eprintln!("Resize surface error: {e}"));
-                pixels
-                    .resize_buffer(vw, vh)
-                    .unwrap_or_else(|e| eprintln!("Resize buffer error: {e}"));
-                pixels
-                    .render_with(|encoder, render_target, context| {
-                        context.scaling_renderer.render(encoder, render_target);
-                        Ok(())
-                    })
-                    .unwrap_or_else(|e| eprintln!("Render error: {e}"));
+                // Debug info / FPS counter
+                println!(
+                    "Rendered frame {}x{} scaled to window {}x{}",
+                    width, height, win_size.width, win_size.height
+                );
 
-                // FPS counter and frame time logs
-                println!("Pixel rendered: {}ms", pixel_render_timer.elapsed().as_millis());
+                // FPS counter and debug prints
+                println!(
+                    "Rendered frame at {}x{} (window {}x{})",
+                    width, height, win_size.width, win_size.height
+                );
+
                 frame_count += 1;
                 if last_frame.elapsed() >= Duration::from_secs(1) {
                     println!("FPS: {}", frame_count);
                     frame_count = 0;
                     last_frame = Instant::now();
                 }
-                // if let Err(e) = pixels.render() {
-                //     eprintln!("Render error: {e}");
-                // }
-                // println!("Pixel rendered: {}ms", pixel_render_timer.elapsed().as_millis());
-                // frame_count += 1;
-                // if last_frame.elapsed() >= Duration::from_secs(1) {
-                //     println!("FPS: {}", frame_count);
-                //     frame_count = 0;
-                //     last_frame = Instant::now();
-                // }
             }
             Event::WindowEvent { event, .. } => match event {
                 //handle window close
