@@ -161,6 +161,7 @@ pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
 //takes info from client and dispatches to correct MessageType handler
 fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(MessageType, Vec<u8>)>) -> Result<(), Box<dyn Error>> {
         loop {
+            let timer = Instant::now();
         // --- Send any pending frames ---
         while let Ok((msg_type, payload)) = frame_receiver.try_recv() {
             send_response(tls, msg_type, &payload)?;
@@ -175,6 +176,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
                     u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
                 let mut payload = vec![0u8; payload_len as usize];
                 tls.read_exact(&mut payload)?;
+                println!("Dispatcher timer: {}ms", timer.elapsed().as_millis());
 
                 match msg_type {
                     MessageType::Text => message_type_handlers::handle_text(&payload)?,
