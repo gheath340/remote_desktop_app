@@ -162,66 +162,66 @@ pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
 fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(MessageType, Vec<u8>)>) -> Result<(), Box<dyn Error>> {
         loop {
             let timer = Instant::now();
-        // --- Send any pending frames ---
-        while let Ok((msg_type, payload)) = frame_receiver.try_recv() {
-            send_response(tls, msg_type, &payload)?;
-        }
+            // --- Send any pending frames ---
+            while let Ok((msg_type, payload)) = frame_receiver.try_recv() {
+                send_response(tls, msg_type, &payload)?;
+            }
 
-        // --- Try to read incoming messages ---
-        let mut header = [0u8; 5];
-        match tls.read_exact(&mut header) {
-            Ok(_) => {
-                let msg_type = MessageType::from_u8(header[0]);
-                let payload_len =
-                    u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
-                let mut payload = vec![0u8; payload_len as usize];
-                tls.read_exact(&mut payload)?;
-                println!("Dispatcher timer: {}ms", timer.elapsed().as_millis());
+            // --- Try to read incoming messages ---
+            let mut header = [0u8; 5];
+            match tls.read_exact(&mut header) {
+                Ok(_) => {
+                    let msg_type = MessageType::from_u8(header[0]);
+                    let payload_len =
+                        u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
+                    let mut payload = vec![0u8; payload_len as usize];
+                    tls.read_exact(&mut payload)?;
+                    println!("Dispatcher timer: {}ms", timer.elapsed().as_millis());
 
-                match msg_type {
-                    MessageType::Text => message_type_handlers::handle_text(&payload)?,
-                    MessageType::Connect => message_type_handlers::handle_connect(&payload)?,
-                    MessageType::Disconnect => message_type_handlers::handle_disconnect(&payload)?,
-                    MessageType::Error => message_type_handlers::handle_error(&payload)?,
+                    match msg_type {
+                        MessageType::Text => message_type_handlers::handle_text(&payload)?,
+                        MessageType::Connect => message_type_handlers::handle_connect(&payload)?,
+                        MessageType::Disconnect => message_type_handlers::handle_disconnect(&payload)?,
+                        MessageType::Error => message_type_handlers::handle_error(&payload)?,
 
-                    //MessageType::FrameFull => message_type_handlers::handle_frame_full(tls)?,
-                    //MessageType::FrameDelta => message_type_handlers::handle_frame_delta(tls)?,
-                    MessageType::FrameFull => {}
-                    MessageType::FrameDelta => {}
-                    MessageType::FrameEnd => {}
-                    MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload)?,
-                    MessageType::CursorPos => message_type_handlers::handle_cursor_pos(&payload)?,
-                    MessageType::Resize => message_type_handlers::handle_resize(&payload)?,
+                        //MessageType::FrameFull => message_type_handlers::handle_frame_full(tls)?,
+                        //MessageType::FrameDelta => message_type_handlers::handle_frame_delta(tls)?,
+                        MessageType::FrameFull => {}
+                        MessageType::FrameDelta => {}
+                        MessageType::FrameEnd => {}
+                        MessageType::CursorShape => message_type_handlers::handle_cursor_shape(&payload)?,
+                        MessageType::CursorPos => message_type_handlers::handle_cursor_pos(&payload)?,
+                        MessageType::Resize => message_type_handlers::handle_resize(&payload)?,
 
-                    MessageType::KeyDown => message_type_handlers::handle_key_down(&payload)?,
-                    MessageType::KeyUp => message_type_handlers::handle_key_up(&payload)?,
-                    MessageType::MouseMove => message_type_handlers::handle_mouse_move(&payload)?,
-                    MessageType::MouseDown => message_type_handlers::handle_mouse_down(&payload)?,
-                    MessageType::MouseUp => message_type_handlers::handle_mouse_up(&payload)?,
-                    MessageType::MouseScroll => message_type_handlers::handle_mouse_scroll(&payload)?,
+                        MessageType::KeyDown => message_type_handlers::handle_key_down(&payload)?,
+                        MessageType::KeyUp => message_type_handlers::handle_key_up(&payload)?,
+                        MessageType::MouseMove => message_type_handlers::handle_mouse_move(&payload)?,
+                        MessageType::MouseDown => message_type_handlers::handle_mouse_down(&payload)?,
+                        MessageType::MouseUp => message_type_handlers::handle_mouse_up(&payload)?,
+                        MessageType::MouseScroll => message_type_handlers::handle_mouse_scroll(&payload)?,
 
-                    MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
+                        MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
 
 
-                    MessageType::Unknown(code) => {
-                        println!("Unknown message type: {code:#X}, skipping {payload_len} bytes");
+                        MessageType::Unknown(code) => {
+                            println!("Unknown message type: {code:#X}, skipping {payload_len} bytes");
+                        }
                     }
                 }
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(2));
+                    continue;
+                }
+                Err(ref e) if e.kind() == ErrorKind::UnexpectedEof => {
+                    println!("Client disconnected");
+                    break;
+                }
+                Err(e) => return Err(Box::new(e)),
             }
-            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(2));
-                continue;
-            }
-            Err(ref e) if e.kind() == ErrorKind::UnexpectedEof => {
-                println!("Client disconnected");
-                break;
-            }
-            Err(e) => return Err(Box::new(e)),
-        }
 
-        // Avoid pegging a CPU core
-        std::thread::sleep(Duration::from_millis(1));
-    }
+            // Avoid pegging a CPU core
+            std::thread::sleep(Duration::from_millis(1));
+        }
 
     Ok(())
 }
