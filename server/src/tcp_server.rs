@@ -165,6 +165,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
             // --- Send any pending frames ---
             while let Ok((msg_type, payload)) = frame_receiver.try_recv() {
                 send_response(tls, msg_type, &payload)?;
+                println!("Dispatcher timer: {}ms", timer.elapsed().as_millis());
             }
 
             // --- Try to read incoming messages ---
@@ -176,7 +177,6 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
                         u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
                     let mut payload = vec![0u8; payload_len as usize];
                     tls.read_exact(&mut payload)?;
-                    println!("Dispatcher timer: {}ms", timer.elapsed().as_millis());
 
                     match msg_type {
                         MessageType::Text => message_type_handlers::handle_text(&payload)?,
