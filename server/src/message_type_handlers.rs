@@ -87,7 +87,8 @@ pub fn handle_frame_delta(prev_frame: &mut Vec<u8>, width: usize, height: usize,
 
     // Save this frame for next delta comparison
     *prev_frame = rgba;
-    Ok((MessageType::FrameDelta, Vec::new()))
+    let compressed_empty = lz4_flex::compress_prepend_size(&[]);
+    Ok((MessageType::FrameEnd, compressed_empty))
 }
 
 //calculate how many pixel blocks have changed
