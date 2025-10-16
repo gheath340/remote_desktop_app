@@ -6,9 +6,6 @@ use std::{
 };
 use crate::tcp_server::send_response;
 use common::message_type::MessageType;
-// use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
-// use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-// use core_graphics::geometry::CGPoint;
 use turbojpeg::{Compressor, Image, PixelFormat, Subsamp, OutputBuf};
 
 pub fn handle_text(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
@@ -152,8 +149,12 @@ pub fn calculate_frame_changes(prev_frame: &mut Vec<u8>, width: usize, height: u
     (frame_changes, rect_count, changed_pixels)
 }
 
-//NEED TO MAKE THIS MORE EFFIECIENT, DONT WANT TO SPAWN NEW YDOTOOL PROCESS EVERY SINGLE MOUSE MOVEMENT
+#[cfg(target_os = "macos")]
 pub fn handle_mouse_move(payload: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton};
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+    use core_graphics::geometry::CGPoint;
+
    if payload.len() < 8 {
         return Err("Invalid MouseMove payload".into());
     }
@@ -163,16 +164,32 @@ pub fn handle_mouse_move(payload: &[u8]) -> Result<(), Box<dyn std::error::Error
     let y = u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
     println!("Mouse move: x={}, y={}", x, y);
 
-    // let src = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-    //     .map_err(|_| "Failed to create CGEventSource")?;
+    let src = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| "Failed to create CGEventSource")?;
 
-    // //create event
-    // let pos = CGPoint::new(x as f64, y as f64);
-    // let move_event = CGEvent::new_mouse_event(src, CGEventType::MouseMoved, pos, CGMouseButton::Left)
-    //     .map_err(|_| "Failed to create CGEvent")?;
+    //create event
+    let pos = CGPoint::new(x as f64, y as f64);
+    let move_event = CGEvent::new_mouse_event(src, CGEventType::MouseMoved, pos, CGMouseButton::Left)
+        .map_err(|_| "Failed to create CGEvent")?;
 
-    // //post it to the system
-    // move_event.post(CGEventTapLocation::HID);
+    //post it to the system
+    move_event.post(CGEventTapLocation::HID);
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn handle_mouse_move(payload: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    use std::process::Command;
+
+    if payload.len() < 8 {
+        return Err("Invalid MouseMove payload".into());
+    }
+
+    // Parse x/y from big-endian u32
+    let x = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let y = u32::from_be_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    println!("Mouse move: x={}, y={}", x, y);
 
     //Call ydotool to actually move the cursor
     std::process::Command::new("ydotool")

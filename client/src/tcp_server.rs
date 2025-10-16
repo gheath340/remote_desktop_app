@@ -212,18 +212,6 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     eprintln!("Render error: {e}");
                 }
 
-                // Debug info / FPS counter
-                println!(
-                    "Rendered frame {}x{} scaled to window {}x{}",
-                    width, height, win_size.width, win_size.height
-                );
-
-                // FPS counter and debug prints
-                println!(
-                    "Rendered frame at {}x{} (window {}x{})",
-                    width, height, win_size.width, win_size.height
-                );
-
                 frame_count += 1;
                 if last_frame.elapsed() >= Duration::from_secs(1) {
                     println!("FPS: {}", frame_count);
