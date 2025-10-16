@@ -104,6 +104,8 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                 process::exit(1);
             });
             tcp.set_nodelay(true).expect("set_nodelay failed");
+            tcp.set_read_timeout(Some(Duration::from_secs(2))).ok();
+            tcp.set_write_timeout(Some(Duration::from_secs(2))).ok();
 
         //get hostname of server
         let server_name_str = addr_str.split(':').next().unwrap_or("localhost").to_string();
@@ -272,8 +274,10 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
             tls.flush()?;
         }
         //create header and read data into header
+        let timer = Instant::now();
         let mut header = [0u8; 5];
         tls.read_exact(&mut header)?;
+        println!("tls.read_exact timer: {}ms", timer.elapsed().as_millis());
 
         //parse message type and payload_len from header
         let msg_type = MessageType::from_u8(header[0]);
@@ -326,6 +330,9 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
             },
             MessageType::FrameDelta => {
                 //decompress image and send it to the UI event loop to be properly handled
+                if payload.len() < 4 {
+                    continue;
+                }
                 let decompressed = decompress_size_prepended(&payload)?;
                 frame_transmitter.send(FrameUpdate::Delta(decompressed)).ok();
                 let _ = proxy.send_event(UserEvent::NewUpdate);
