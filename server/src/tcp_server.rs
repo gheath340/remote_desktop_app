@@ -125,7 +125,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
 
         if let Some((_, _, rgba)) = latest {
             // offline delta generation — this version just returns Vec<u8>
-            let timer 2 = Instant::now();
+            let timer2 = Instant::now();
             match message_type_handlers::handle_frame_delta(
                 &mut prev_frame,
                 width,
@@ -231,11 +231,13 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
 }
 
 pub fn send_response<T: Write>( stream: &mut T, msg_type: MessageType, payload: &[u8],) -> Result<(), Box<dyn Error>> {
+    let timer = Instant::now();
     let type_byte = msg_type.to_u8();
     let len_bytes = (payload.len() as u32).to_be_bytes();
 
     // Helper closure to handle writes that may return WouldBlock
     let mut write_all_retry = |data: &[u8]| -> Result<(), Box<dyn Error>> {
+        let timer1 = Instant::now();
         let mut offset = 0;
         while offset < data.len() {
             match stream.write(&data[offset..]) {
@@ -248,17 +250,22 @@ pub fn send_response<T: Write>( stream: &mut T, msg_type: MessageType, payload: 
                 }
                 Err(e) => return Err(Box::new(e)),
             }
+            println!("write_all_retry timer: {}ms", timer.elapsed().as_millis());
         }
         Ok(())
     };
 
     // write the header + payload with retry
+    let timer1 = Instant::now();
     write_all_retry(&[type_byte])?;
     write_all_retry(&len_bytes)?;
     write_all_retry(payload)?;
+    println!("Writing all in send response timer: {}ms", timer1.elapsed().as_millis());
+
 
     if msg_type == MessageType::FrameEnd {
         // flush may also hit WouldBlock, so handle it the same way
+        let timer2 = Instant::now();
         loop {
             match stream.flush() {
                 Ok(_) => break,
@@ -268,6 +275,8 @@ pub fn send_response<T: Write>( stream: &mut T, msg_type: MessageType, payload: 
                 }
                 Err(e) => return Err(Box::new(e)),
             }
+            println!("Frame end timer: {}ms", timer2.elapsed().as_millis());
+
         }
     }
     Ok(())
