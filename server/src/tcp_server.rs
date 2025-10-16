@@ -224,25 +224,50 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
     Ok(())
 }
 
-//sends given message to server
-pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8]) -> Result<(), Box<dyn Error>> {
+pub fn send_response<T: Write>( stream: &mut T, msg_type: MessageType, payload: &[u8],) -> Result<(), Box<dyn Error>> {
     let send_response_timer = Instant::now();
-    //get the byte value from msg_type
-    let type_byte = msg_type.to_u8();
 
-    //encode the length of payload into bytes
+    let type_byte = msg_type.to_u8();
     let len_bytes = (payload.len() as u32).to_be_bytes();
 
-    //write the header
-    stream.write_all(&[type_byte])?;
-    stream.write_all(&len_bytes)?;
+    // Helper closure to handle writes that may return WouldBlock
+    let mut write_all_retry = |data: &[u8]| -> Result<(), Box<dyn Error>> {
+        let mut offset = 0;
+        while offset < data.len() {
+            match stream.write(&data[offset..]) {
+                Ok(0) => return Err("Socket closed while writing".into()),
+                Ok(n) => offset += n,
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                    // Socket not ready yet — back off and retry
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
+                Err(e) => return Err(Box::new(e)),
+            }
+        }
+        Ok(())
+    };
 
-    //write payload and make sure it goes
-    stream.write_all(&payload)?;
+    // write the header + payload with retry
+    write_all_retry(&[type_byte])?;
+    write_all_retry(&len_bytes)?;
+    write_all_retry(payload)?;
+
     if msg_type == MessageType::FrameEnd {
-        stream.flush()?;
+        // flush may also hit WouldBlock, so handle it the same way
+        loop {
+            match stream.flush() {
+                Ok(_) => break,
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
+                Err(e) => return Err(Box::new(e)),
+            }
+        }
     }
-    println!("Send response: {}ms", send_response_timer.elapsed().as_millis());
 
+    println!("Send response: {}ms", send_response_timer.elapsed().as_millis());
     Ok(())
 }
+
