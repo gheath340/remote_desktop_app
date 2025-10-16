@@ -33,8 +33,6 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
 }
 
 pub fn handle_frame_full(compressor: &mut Compressor, output: &mut OutputBuf, rgba: &Vec<u8>, width: usize, height: usize) -> Result<(MessageType, Vec<u8>), Box<dyn Error>> {
-    let t2 = Instant::now();
-
     //create image and tell decoder how to handle image
     let image = Image {
                 pixels: rgba.as_slice(), //mut slice pointing to rgba buffer
@@ -48,8 +46,6 @@ pub fn handle_frame_full(compressor: &mut Compressor, output: &mut OutputBuf, rg
     compressor.compress(image, output)?;
 
     //send reference of output buffer
-    let full_frame_ms = t2.elapsed().as_millis();
-    print!("Full frame: {}ms    ", full_frame_ms);
     let output_clone = output.as_ref().to_vec();
 
     Ok((MessageType::FrameFull, output_clone))
