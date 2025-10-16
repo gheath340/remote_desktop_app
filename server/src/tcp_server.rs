@@ -23,6 +23,45 @@ use turbojpeg::{ Compressor,
 use common::message_type::MessageType;
 use crate::message_type_handlers;
 use crate::capture::start_sck_stream;
+use openh264::{ encoder::{Encoder, EncoderConfig}, formats::YUVBuffer };
+
+// fn rgba_to_i420(rgba: &[u8], out: &mut [u8], width: usize, height: usize) {
+//     let frame_size = width * height;
+//     let (y_plane, uv_planes) = out.split_at_mut(frame_size);
+//     let (u_plane, v_plane) = uv_planes.split_at_mut(frame_size / 4);
+
+//     for j in 0..height {
+//         for i in 0..width {
+//             let idx = (j * width + i) * 4;
+//             let r = rgba[idx] as f32;
+//             let g = rgba[idx + 1] as f32;
+//             let b = rgba[idx + 2] as f32;
+
+//             // BT.601-ish
+//             let y = 0.257 * r + 0.504 * g + 0.098 * b + 16.0;
+//             y_plane[j * width + i] = y as u8;
+
+//             if (j & 1) == 0 && (i & 1) == 0 {
+//                 let u = -0.148 * r - 0.291 * g + 0.439 * b + 128.0;
+//                 let v =  0.439 * r - 0.368 * g - 0.071 * b + 128.0;
+//                 let uv_idx = (j / 2) * (width / 2) + (i / 2);
+//                 u_plane[uv_idx] = u as u8;
+//                 v_plane[uv_idx] = v as u8;
+//             }
+//         }
+//     }
+// }
+fn rgba_to_rgb(rgba: &[u8]) -> Vec<u8> {
+    // Allocate a 3-byte-per-pixel buffer
+    let mut rgb = Vec::with_capacity(rgba.len() / 4 * 3);
+
+    // Copy every pixel’s RGB, skip the alpha
+    for chunk in rgba.chunks_exact(4) {
+        rgb.extend_from_slice(&chunk[0..3]);
+    }
+
+    rgb
+}
 
 //TO RUN YDOTOOLD(to allow for mouse and keyboard input) run "~/bin/ydotool_session.sh" in empty terminal window
 //run "sudo pkill -f ydotoold" to stop ydotoold
@@ -87,28 +126,54 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     println!("ScreenCaptureKit capture started…");
 
     let (width, height, first_rgba) = rx.recv()?;
+    let first_rgb = rgba_to_rgb(&first_rgba);
+
+        // Pick a bitrate that fits your LAN/WAN; start at 4–8 Mbps for 1080p
+
+
+    // Build encoder
+    let mut encoder = Encoder::with_config(
+        EncoderConfig::new(width as u32, height as u32)
+            .max_frame_rate(30.0)
+            .debug(false)
+    )?;
+
+    // Convert directly to YUV (the library handles RGB→YUV internally)
+    let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &first_rgb);
+
+    // Encode the frame
+    let bitstream = encoder.encode(&yuv)?;
+    let encoded_bytes = bitstream.to_vec();
+    println!("Encoded frame size: {} bytes", encoded_bytes.len());
+
+
+    // Send it to client
+    frame_transmitter.send((MessageType::FrameDelta, encoded_bytes))?;
+    frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
 
     // Send that as the initial full frame
-    {
-        let mut compressor = Compressor::new()?;
-        compressor.set_subsamp(Subsamp::Sub2x2)?;
-        compressor.set_quality(80)?;
-        let mut output = OutputBuf::new_owned();
+    // {
+    //     let mut compressor = Compressor::new()?;
+    //     compressor.set_subsamp(Subsamp::Sub2x2)?;
+    //     compressor.set_quality(80)?;
+    //     let mut output = OutputBuf::new_owned();
 
-        let image = Image {
-            pixels: first_rgba.as_slice(),
-            width,
-            pitch: width * 4,
-            height,
-            format: PixelFormat::RGBA,
-        };
-        compressor.compress(image, &mut output)?;
-        let jpeg = output.as_ref().to_vec();
+    //     let image = Image {
+    //         pixels: first_rgba.as_slice(),
+    //         width,
+    //         pitch: width * 4,
+    //         height,
+    //         format: PixelFormat::RGBA,
+    //     };
+    //     compressor.compress(image, &mut output)?;
+    //     let jpeg = output.as_ref().to_vec();
 
-        // Kickstart the client: Full frame + FrameEnd (FrameEnd also forces a flush on your send_response)
-        frame_transmitter.send((MessageType::FrameFull, jpeg))?;
-        frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
-    }
+    //     // Kickstart the client: Full frame + FrameEnd (FrameEnd also forces a flush on your send_response)
+    //     frame_transmitter.send((MessageType::FrameFull, jpeg))?;
+    //     frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
+    // }
+
+
 
     // Initialize prev_frame with the first frame so deltas work
     let mut prev_frame = first_rgba;
@@ -126,24 +191,42 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
         }
 
         if let Some((_, _, rgba)) = latest {
-            // offline delta generation — this version just returns Vec<u8>
-            let timer2 = Instant::now();
-            match message_type_handlers::handle_frame_delta(
-                &mut prev_frame,
-                width,
-                height,
-                rgba,
-            ) {
-                Ok((msg_type, payload)) => {
-                    frame_transmitter.send((msg_type, payload))?;
-                    frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
-                    println!("Frame loop handle_frame_delta time: {}ms", timer2.elapsed().as_millis());
-                }
-                Err(e) => eprintln!("Frame processing error: {e}"),
+            let t_encode = Instant::now();
+            let rgb = rgba_to_rgb(&rgba);
+
+            let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb);
+
+            // Encode the frame
+            let bitstream = encoder.encode(&yuv)?;
+            let encoded = bitstream.to_vec();
+            println!("Encoded frame size: {} bytes", encoded.len());
+
+            if !encoded.is_empty() {
+                frame_transmitter.send((MessageType::FrameDelta, encoded))?;
+                frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
             }
 
-            println!("Frame full loop time: {}ms", loop_timer.elapsed().as_millis());
+            println!("encode+send: {}ms", t_encode.elapsed().as_millis());
         }
+        // if let Some((_, _, rgba)) = latest {
+        //     // offline delta generation — this version just returns Vec<u8>
+        //     let timer2 = Instant::now();
+        //     match message_type_handlers::handle_frame_delta(
+        //         &mut prev_frame,
+        //         width,
+        //         height,
+        //         rgba,
+        //     ) {
+        //         Ok((msg_type, payload)) => {
+        //             frame_transmitter.send((msg_type, payload))?;
+        //             frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
+        //             println!("Frame loop handle_frame_delta time: {}ms", timer2.elapsed().as_millis());
+        //         }
+        //         Err(e) => eprintln!("Frame processing error: {e}"),
+        //     }
+
+        //     println!("Frame full loop time: {}ms", loop_timer.elapsed().as_millis());
+        // }
 
         thread::sleep(std::time::Duration::from_millis(16));
     }
@@ -375,7 +458,7 @@ pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &
 
     // Single TLS record write — no multi-part small writes
     write_all_retry(&buf)?;
-    stream.flush();
+    let _ = stream.flush();
 
     // Optional flush for frame end — though usually unnecessary for rustls
     // if msg_type == MessageType::FrameEnd {
