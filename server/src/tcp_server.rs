@@ -116,12 +116,16 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
         let mut latest = None;
 
         // drain the capture channel and keep only the latest frame
+        let timer1 = Instant::now();
         while let Ok(frame) = rx.try_recv() {
             latest = Some(frame);
+            println!("Frame loop rx.try_recv time: {}ms", timer1.elapsed().as_millis());
+
         }
 
         if let Some((_, _, rgba)) = latest {
             // offline delta generation — this version just returns Vec<u8>
+            let timer 2 = Instant::now();
             match message_type_handlers::handle_frame_delta(
                 &mut prev_frame,
                 width,
@@ -131,12 +135,12 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
                 Ok((msg_type, payload)) => {
                     frame_transmitter.send((msg_type, payload))?;
                     frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
-
+                    println!("Frame loop handle_frame_delta time: {}ms", timer2.elapsed().as_millis());
                 }
                 Err(e) => eprintln!("Frame processing error: {e}"),
             }
 
-            println!("Frame loop time: {}ms", loop_timer.elapsed().as_millis());
+            println!("Frame full loop time: {}ms", loop_timer.elapsed().as_millis());
         }
 
         thread::sleep(std::time::Duration::from_millis(16));
