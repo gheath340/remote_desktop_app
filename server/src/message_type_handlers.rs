@@ -87,7 +87,7 @@ pub fn handle_frame_delta(prev_frame: &mut Vec<u8>, width: usize, height: usize,
 
     // Save this frame for next delta comparison
     *prev_frame = rgba;
-    Ok((MessageType::FrameEnd, Vec::new()))
+    Ok((MessageType::FrameDelta, Vec::new()))
 }
 
 //calculate how many pixel blocks have changed
