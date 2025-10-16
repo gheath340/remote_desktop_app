@@ -31,6 +31,40 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     tcp.set_nonblocking(true)?;
     // --- Create TLS stream ---
     let mut tls_conn = ServerConnection::new(tls_config.clone())?;
+    loop {
+        match tls_conn.complete_io(&mut tcp) {
+            Ok((_rd, _wr)) => {
+                // Handshake complete when both conditions true:
+                if !tls_conn.is_handshaking() {
+                    break;
+                }
+            }
+
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // Socket not ready yet — wait a bit and try again
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                // Interrupted by signal, just retry
+                continue;
+            }
+
+            Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                // Client disconnected before handshake finished
+                return Err("Client disconnected during TLS handshake".into());
+            }
+
+            Err(e) => {
+                // Any other error is fatal
+                return Err(Box::new(e));
+            }
+        }
+
+        // Optional: back off a bit if handshake is still progressing
+        std::thread::sleep(Duration::from_millis(1));
+    }
     let tls = StreamOwned::new(tls_conn, tcp);
 
     println!("New client connection");
