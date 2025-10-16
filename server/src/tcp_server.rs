@@ -225,8 +225,6 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
 }
 
 pub fn send_response<T: Write>( stream: &mut T, msg_type: MessageType, payload: &[u8],) -> Result<(), Box<dyn Error>> {
-    let send_response_timer = Instant::now();
-
     let type_byte = msg_type.to_u8();
     let len_bytes = (payload.len() as u32).to_be_bytes();
 
@@ -266,8 +264,6 @@ pub fn send_response<T: Write>( stream: &mut T, msg_type: MessageType, payload: 
             }
         }
     }
-
-    println!("Send response: {}ms", send_response_timer.elapsed().as_millis());
     Ok(())
 }
 

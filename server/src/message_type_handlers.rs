@@ -56,9 +56,6 @@ pub fn handle_frame_full(compressor: &mut Compressor, output: &mut OutputBuf, rg
 }
 
 pub fn handle_frame_delta(prev_frame: &mut Vec<u8>, width: usize, height: usize, rgba: Vec<u8>) -> Result<(MessageType, Vec<u8>), Box<dyn Error>> {
-    //start timer
-    let start_total = Instant::now();
-
     // Create compressor + output buffer
     let mut compressor = Compressor::new()?;
     let _ = compressor.set_subsamp(Subsamp::Sub2x2);
@@ -77,8 +74,6 @@ pub fn handle_frame_delta(prev_frame: &mut Vec<u8>, width: usize, height: usize,
         //if more than half the image changed handle it as a full frame change
         if change_ratio > 0.5 {
             let (msg_type, payload) = handle_frame_full(&mut compressor, &mut output, &rgba, width, height)?;
-            let total_ms = start_total.elapsed().as_millis();
-            println!("Handle frame otal: {}ms", total_ms);
             *prev_frame = rgba;
             return Ok((msg_type, payload));
         //if less than half of the image changed handle it as delta change
@@ -89,10 +84,6 @@ pub fn handle_frame_delta(prev_frame: &mut Vec<u8>, width: usize, height: usize,
             payload.extend_from_slice(&frame_changes);
 
             let compressed = lz4_flex::compress_prepend_size(&payload);
-            let delta_frame_ms = t3.elapsed().as_millis();
-            print!("Delta frame: {}ms   ", delta_frame_ms);
-            let total_ms = start_total.elapsed().as_millis();
-            println!("Handle frame total: {}ms", total_ms);
             *prev_frame = rgba;
             return Ok((MessageType::FrameDelta, compressed));
         }
