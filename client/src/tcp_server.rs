@@ -24,6 +24,8 @@ use crate::{ message_type_handlers, };
 use lz4_flex::decompress_size_prepended;
 //use pixels::wgpu::SurfaceSize;
 use pixels::wgpu;
+use openh264::decoder::Decoder;
+use openh264::formats::YUVSource;
 
 
  #[derive(Debug)]
@@ -70,6 +72,32 @@ fn calculate_viewport(win_w: u32, win_h: u32, frame_w: u32, frame_h: u32,) -> (u
     };
 }
 
+fn yuv420_to_rgba(y: &[u8], u: &[u8], v: &[u8], width: usize, height: usize) -> Vec<u8> {
+    let mut rgba = vec![0u8; width * height * 4];
+
+    for j in 0..height {
+        for i in 0..width {
+            let y_val = y[j * width + i] as f32;
+            let u_val = u[(j / 2) * (width / 2) + (i / 2)] as f32;
+            let v_val = v[(j / 2) * (width / 2) + (i / 2)] as f32;
+
+            let c = y_val - 16.0;
+            let d = u_val - 128.0;
+            let e = v_val - 128.0;
+
+            let r = (1.164 * c + 1.596 * e).clamp(0.0, 255.0) as u8;
+            let g = (1.164 * c - 0.392 * d - 0.813 * e).clamp(0.0, 255.0) as u8;
+            let b = (1.164 * c + 2.017 * d).clamp(0.0, 255.0) as u8;
+
+            let idx = (j * width + i) * 4;
+            rgba[idx] = r;
+            rgba[idx + 1] = g;
+            rgba[idx + 2] = b;
+            rgba[idx + 3] = 255;
+        }
+    }
+    rgba
+}
 
 //to run on local host SERVER_ADDR=127.0.0.1:7878 cargo run --release -p client
 //to run on vm at home comment out other _address vars  and change connection_address to vm_work_address.clone()
@@ -264,6 +292,8 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
 fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>, mouse_receiver: mpsc::Receiver<Vec<u8>>) -> Result<(), Box<dyn Error>> {
     //create decompressor outside of loop to not recreate one every time
     let mut decompressor = turbojpeg::Decompressor::new()?;
+    let mut decoder = Decoder::new().unwrap();
+    let mut h264_buffer: Vec<u8> = Vec::new();
     loop{
 
         while let Ok(packet) = mouse_receiver.try_recv() {
@@ -306,40 +336,96 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
 
             MessageType::Clipboard => message_type_handlers::handle_clipboard(&payload)?,
 
-            MessageType::FrameFull => {
-                //inspect the jpeg header to get size without a full decode
-                let header = decompressor.read_header(&payload)?;
-                let w = header.width as usize;
-                let h = header.height as usize;
+            // MessageType::FrameFull | MessageType::FrameDelta => {
+            // // Feed the H.264 bitstream chunk into the decoder
+            //     if let Ok(decoded) = decoder.decode(&payload) {
+            //         if let Some(frame) = decoded {
+            //             let w = frame.width() as usize;
+            //             let h = frame.height() as usize;
+            //             let y = frame.y();
+            //             let u = frame.u();
+            //             let v = frame.v();
 
-                //allocate target buffer to accept rgba
-                let mut rgba = vec![0u8; w * h * 4];
-                //tells the decoder how to handle the pixels
-                let out = turbojpeg::Image {
-                    pixels: rgba.as_mut_slice(), //mut slice pointing to rgba buffer
-                    width: w, //width of jpeg
-                    pitch: w * 4, //how many bytes per row(width * 4 for rgba)
-                    height: h, //height of jpeg
-                    format: turbojpeg::PixelFormat::RGBA, //the format you want the output to be
-                };
-                //decompresses right into rgba buffer
-                decompressor.decompress(&payload, out)?;
-
-                frame_transmitter.send(FrameUpdate::Full{w: w as u32, h: h as u32, bytes: rgba}).ok();
-                let _ = proxy.send_event(UserEvent::NewUpdate);
-            },
-            MessageType::FrameDelta => {
-                //decompress image and send it to the UI event loop to be properly handled
-                if payload.len() < 4 {
-                    continue;
-                }
-                let decompressed = decompress_size_prepended(&payload)?;
-                frame_transmitter.send(FrameUpdate::Delta(decompressed)).ok();
-                let _ = proxy.send_event(UserEvent::NewUpdate);
+            //             let rgba = yuv420_to_rgba(y, u, v, w, h);
+            //             frame_transmitter
+            //                 .send(FrameUpdate::Full { w: w as u32, h: h as u32, bytes: rgba })
+            //                 .ok();
+            //             let _ = proxy.send_event(UserEvent::NewUpdate);
+            //         }
+            //     }
+            // }
+            MessageType::FrameFull | MessageType::FrameDelta => {
+                h264_buffer.extend_from_slice(&payload);
             }
+
+
+
+            // MessageType::FrameFull => {
+            //     //inspect the jpeg header to get size without a full decode
+            //     let header = decompressor.read_header(&payload)?;
+            //     let w = header.width as usize;
+            //     let h = header.height as usize;
+
+            //     //allocate target buffer to accept rgba
+            //     let mut rgba = vec![0u8; w * h * 4];
+            //     //tells the decoder how to handle the pixels
+            //     let out = turbojpeg::Image {
+            //         pixels: rgba.as_mut_slice(), //mut slice pointing to rgba buffer
+            //         width: w, //width of jpeg
+            //         pitch: w * 4, //how many bytes per row(width * 4 for rgba)
+            //         height: h, //height of jpeg
+            //         format: turbojpeg::PixelFormat::RGBA, //the format you want the output to be
+            //     };
+            //     //decompresses right into rgba buffer
+            //     decompressor.decompress(&payload, out)?;
+
+            //     frame_transmitter.send(FrameUpdate::Full{w: w as u32, h: h as u32, bytes: rgba}).ok();
+            //     let _ = proxy.send_event(UserEvent::NewUpdate);
+            // },
+            // MessageType::FrameDelta => {
+            //     //decompress image and send it to the UI event loop to be properly handled
+            //     if payload.len() < 4 {
+            //         continue;
+            //     }
+            //     let decompressed = decompress_size_prepended(&payload)?;
+            //     frame_transmitter.send(FrameUpdate::Delta(decompressed)).ok();
+            //     let _ = proxy.send_event(UserEvent::NewUpdate);
+            // }
             MessageType::FrameEnd => {
-                // This is the signal: all deltas applied, now request redraw
-                proxy.send_event(UserEvent::Redraw).ok();
+                    println!("Decoding frame: {} bytes", h264_buffer.len());
+                    if h264_buffer.is_empty() {
+                        eprintln!("Warning: FrameEnd with empty buffer!");
+                        return Ok(());
+                    }
+
+                    match decoder.decode(&h264_buffer) {
+                        Ok(Some(frame)) => {
+                            let w = frame.width() as usize;
+                            let h = frame.height() as usize;
+                            let y = frame.y();
+                            let u = frame.u();
+                            let v = frame.v();
+
+                            let rgba = yuv420_to_rgba(y, u, v, w, h);
+
+                            frame_transmitter
+                                .send(FrameUpdate::Full {
+                                    w: w as u32,
+                                    h: h as u32,
+                                    bytes: rgba,
+                                })
+                                .ok();
+                            let _ = proxy.send_event(UserEvent::NewUpdate);
+                        }
+                        Ok(None) => {
+                            // No frame yet — OpenH264 sometimes buffers until a complete NAL unit arrives
+                            println!("Decoder returned None (waiting for full frame data)");
+                        }
+                        Err(e) => eprintln!("Decode error: {:?}", e),
+                    }
+
+                    // Clear after decode
+                    h264_buffer.clear();
             }
 
             MessageType::Unknown(code) => {
