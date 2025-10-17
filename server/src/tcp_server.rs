@@ -23,7 +23,10 @@ use turbojpeg::{ Compressor,
 use common::message_type::MessageType;
 use crate::message_type_handlers;
 use crate::capture::start_sck_stream;
-use openh264::{ encoder::{Encoder, EncoderConfig}, formats::YUVBuffer };
+use openh264::{ 
+    encoder::{ Encoder, EncoderConfig, RateControlMode }, 
+    formats::YUVBuffer,
+};
 
 
 fn rgba_to_rgb(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
@@ -38,29 +41,6 @@ fn rgba_to_rgb(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
     }
     rgb
 }
-
-fn dump_nal_types_annexb(buf: &[u8]) {
-    // Walk start-code delimited NALs and print their types
-    let mut i = 0;
-    while i + 4 <= buf.len() {
-        // find start code
-        if i + 4 <= buf.len() && &buf[i..i+4] == [0,0,0,1] {
-            i += 4;
-            if i >= buf.len() { break; }
-            let nal = buf[i];
-            let nal_type = nal & 0x1F;
-            println!("  NAL type: {}", nal_type);
-            // advance to next start code
-            // naive scan forward until next 0 0 0 1
-            let mut j = i + 1;
-            while j + 4 <= buf.len() && &buf[j..j+4] != [0,0,0,1] { j += 1; }
-            i = j;
-        } else {
-            i += 1;
-        }
-    }
-}
-
 
 //TO RUN YDOTOOLD(to allow for mouse and keyboard input) run "~/bin/ydotool_session.sh" in empty terminal window
 //run "sudo pkill -f ydotoold" to stop ydotoold
@@ -126,26 +106,27 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
 
     let (width, height, first_rgba) = rx.recv()?;
     let first_rgb = rgba_to_rgb(&first_rgba, width, height);
-    assert_eq!(first_rgb.len(), width as usize * height as usize * 3, "First RGB size mismatch");
 
     // Build encoder
-    let mut encoder = Encoder::with_config(
-        EncoderConfig::new(width as u32, height as u32)
-            .max_frame_rate(30.0)
-            .set_bitrate_bps(5_000_000)
-            .debug(false)
-    )?;
+    // let mut encoder = Encoder::with_config(
+    //     EncoderConfig::new(width as u32, height as u32)
+    //         .max_frame_rate(30.0)
+    //         .set_bitrate_bps(5_000_000)
+    //         .debug(false)
+    // )?;
+    let enc_cfg = EncoderConfig::new(width as u32, height as u32)
+        .max_frame_rate(30.0)
+        .set_bitrate_bps(5_000_000)
+        .rate_control_mode(RateControlMode::Bitrate);
 
-    let mut frame_count: u32 = 0;
+    let mut encoder = Encoder::with_config(enc_cfg)?;
+
     // Convert directly to YUV (the library handles RGB→YUV internally)
     let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &first_rgb);
 
     // Encode the frame
     let bitstream = encoder.encode(&yuv)?;
     let encoded_bytes = bitstream.to_vec();
-    dump_nal_types_annexb(&encoded_bytes);
-    println!("Encoded frame size: {} bytes", encoded_bytes.len());
-
 
     // Send it to client
     frame_transmitter.send((MessageType::FrameDelta, encoded_bytes))?;
@@ -162,8 +143,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
         let timer1 = Instant::now();
         while let Ok(frame) = rx.try_recv() {
             latest = Some(frame);
-            println!("Frame loop rx.try_recv time: {}ms", timer1.elapsed().as_millis());
-
         }
 
         if let Some((_, _, rgba)) = latest {
@@ -174,29 +153,17 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             }
             let t_encode = Instant::now();
             let rgb = rgba_to_rgb(&rgba, width, height);
-            assert_eq!(rgb.len(), width as usize * height as usize * 3, "RGB size mismatch");
 
             let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb);
-            if frame_count % 60 == 0 {
-                encoder = Encoder::with_config(
-                EncoderConfig::new(width as u32, height as u32)
-                    .max_frame_rate(30.0)
-                    .set_bitrate_bps(5_000_000)
-            )?;
-            }
 
             // Encode the frame
             let bitstream = encoder.encode(&yuv)?;
             let mut encoded = bitstream.to_vec();
-            dump_nal_types_annexb(&encoded);
-            println!("Encoded frame size: {} bytes", encoded.len());
 
             if !encoded.is_empty() {
                 frame_transmitter.send((MessageType::FrameDelta, encoded))?;
                 frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
             }
-
-            println!("encode+send: {}ms", t_encode.elapsed().as_millis());
         }
 
         thread::sleep(std::time::Duration::from_millis(16));
@@ -258,7 +225,6 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
 
         let mut sent_any = false;
         while let Ok((msg_type, payload)) = frame_receiver.try_recv() {
-            println!("[DISPATCH SEND] {:?} | {} bytes | {:?}", msg_type, payload.len(), Instant::now());
             send_response(tls, msg_type, &payload)?;
             sent_any = true;
         }
