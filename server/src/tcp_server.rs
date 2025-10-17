@@ -51,6 +51,27 @@ fn rgba_to_rgb_inplace(dst_rgb: &mut [u8], src_rgba: &[u8]) {
     }
 }
 
+fn downscale_rgba_box_2x(dst: &mut [u8], src: &[u8], w: usize, h: usize) -> (usize, usize) {
+    let nw = w / 2;
+    let nh = h / 2;
+    for y in 0..nh {
+        for x in 0..nw {
+            let mut r:u32=0; let mut g:u32=0; let mut b:u32=0; let mut a:u32=0;
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    let i = ((2*y+dy)*w + (2*x+dx))*4;
+                    r += src[i+0] as u32;
+                    g += src[i+1] as u32;
+                    b += src[i+2] as u32;
+                    a += src[i+3] as u32;
+                }
+            }
+            let o = (y*nw + x)*4;
+            dst[o+0]=(r/4) as u8; dst[o+1]=(g/4) as u8; dst[o+2]=(b/4) as u8; dst[o+3]=(a/4) as u8;
+        }
+    }
+    (nw, nh)
+}
 
 //TO RUN YDOTOOLD(to allow for mouse and keyboard input) run "~/bin/ydotool_session.sh" in empty terminal window
 //run "sudo pkill -f ydotoold" to stop ydotoold
@@ -117,6 +138,8 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     let (width, height, first_rgba) = rx.recv()?;
     // let first_rgb = rgba_to_rgb(&first_rgba, width, height);
     let mut rgb_buf = vec![0u8; width * height * 3];
+    let mut down_rgba = vec![0u8; (width / 2) * (height / 2) * 4];
+
     rgba_to_rgb_inplace(&mut rgb_buf, &first_rgba);
 
     // Build encoder
@@ -128,7 +151,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     // )?;
     let enc_cfg = EncoderConfig::new(width as u32, height as u32)
         .max_frame_rate(30.0)
-        .set_bitrate_bps(5_000_000)
+        .set_bitrate_bps(8_000_000)
         .rate_control_mode(RateControlMode::Bitrate);
 
     let mut encoder = Encoder::with_config(enc_cfg)?;
@@ -168,11 +191,21 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             let t_encode = Instant::now();
             //let rgb = rgba_to_rgb(&rgba, width, height);
             rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
+            let (enc_w, enc_h, rgb_src_slice) = if width > 1920 {
+                // pre-allocate once outside the loop:
+                // let mut down_rgba = vec![0u8; (width/2)*(height/2)*4];
+                let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, width, height);
+                // pre-alloc once: let mut rgb_buf = vec![0u8; nw*nh*3];
+                rgba_to_rgb_inplace(&mut rgb_buf[0..nw*nh*3], &down_rgba[0..nw*nh*4]);
+                (nw, nh, &rgb_buf[0..nw*nh*3])
+            } else {
+                // pre-alloc once: let mut rgb_buf = vec![0u8; width*height*3];
+                rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
+                (width, height, &rgb_buf[..])
+            };
 
             // let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb);
             let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb_buf);
-
-
             // Encode the frame
             let bitstream = encoder.encode(&yuv)?;
             let mut encoded = bitstream.to_vec();
@@ -183,7 +216,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             }
         }
 
-        thread::sleep(std::time::Duration::from_millis(16));
+        //thread::sleep(std::time::Duration::from_millis(16));
     }
 }
 
