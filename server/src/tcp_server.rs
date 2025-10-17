@@ -51,30 +51,41 @@ use openh264::{ encoder::{Encoder, EncoderConfig}, formats::YUVBuffer };
 //         }
 //     }
 // }
-fn rgba_to_rgb(rgba: &[u8]) -> Vec<u8> {
-    // Allocate a 3-byte-per-pixel buffer
-    let mut rgb = Vec::with_capacity(rgba.len() / 4 * 3);
-
-    // Copy every pixel’s RGB, skip the alpha
-    for chunk in rgba.chunks_exact(4) {
-        rgb.extend_from_slice(&chunk[0..3]);
+fn rgba_to_rgb(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
+    let mut rgb = Vec::with_capacity(width * height * 3);
+    for y in 0..height {
+        for x in 0..width {
+            let i = (y * width + x) * 4;
+            rgb.push(rgba[i]);
+            rgb.push(rgba[i + 1]);
+            rgb.push(rgba[i + 2]);
+        }
     }
-
     rgb
 }
 
-// Utility: ensure Annex B stream format for decoder compatibility
-fn ensure_annexb(encoded: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(encoded.len() + 4);
+fn dump_nal_types_annexb(buf: &[u8]) {
+    // Walk start-code delimited NALs and print their types
     let mut i = 0;
-    while i + 4 <= encoded.len() {
-        let nal_len = u32::from_be_bytes(encoded[i..i + 4].try_into().unwrap()) as usize;
-        out.extend_from_slice(&[0, 0, 0, 1]);
-        out.extend_from_slice(&encoded[i + 4..i + 4 + nal_len]);
-        i += 4 + nal_len;
+    while i + 4 <= buf.len() {
+        // find start code
+        if i + 4 <= buf.len() && &buf[i..i+4] == [0,0,0,1] {
+            i += 4;
+            if i >= buf.len() { break; }
+            let nal = buf[i];
+            let nal_type = nal & 0x1F;
+            println!("  NAL type: {}", nal_type);
+            // advance to next start code
+            // naive scan forward until next 0 0 0 1
+            let mut j = i + 1;
+            while j + 4 <= buf.len() && &buf[j..j+4] != [0,0,0,1] { j += 1; }
+            i = j;
+        } else {
+            i += 1;
+        }
     }
-    out
 }
+
 
 //TO RUN YDOTOOLD(to allow for mouse and keyboard input) run "~/bin/ydotool_session.sh" in empty terminal window
 //run "sudo pkill -f ydotoold" to stop ydotoold
@@ -139,24 +150,25 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     println!("ScreenCaptureKit capture started…");
 
     let (width, height, first_rgba) = rx.recv()?;
-    let first_rgb = rgba_to_rgb(&first_rgba);
-
-        // Pick a bitrate that fits your LAN/WAN; start at 4–8 Mbps for 1080p
-
+    let first_rgb = rgba_to_rgb(&first_rgba, width, height);
+    assert_eq!(first_rgb.len(), width as usize * height as usize * 3, "First RGB size mismatch");
 
     // Build encoder
     let mut encoder = Encoder::with_config(
         EncoderConfig::new(width as u32, height as u32)
             .max_frame_rate(30.0)
+            .set_bitrate_bps(5_000_000)
             .debug(false)
     )?;
 
+    let mut frame_count: u32 = 0;
     // Convert directly to YUV (the library handles RGB→YUV internally)
     let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &first_rgb);
 
     // Encode the frame
     let bitstream = encoder.encode(&yuv)?;
     let encoded_bytes = bitstream.to_vec();
+    dump_nal_types_annexb(&encoded_bytes);
     println!("Encoded frame size: {} bytes", encoded_bytes.len());
 
 
@@ -204,15 +216,28 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
         }
 
         if let Some((_, _, rgba)) = latest {
+            if rgba.len() != width * height * 4 {
+                eprintln!( "⚠️ Frame size mismatch: rgba.len() = {}, expected = {} ({}x{})",rgba.len(),width * height * 4,width,height);
+            } else {
+                println!("✅ Frame size OK: {} bytes ({}x{})", rgba.len(), width, height);
+            }
             let t_encode = Instant::now();
-            let rgb = rgba_to_rgb(&rgba);
+            let rgb = rgba_to_rgb(&rgba, width, height);
+            assert_eq!(rgb.len(), width as usize * height as usize * 3, "RGB size mismatch");
 
             let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb);
+            if frame_count % 60 == 0 {
+                encoder = Encoder::with_config(
+                EncoderConfig::new(width as u32, height as u32)
+                    .max_frame_rate(30.0)
+                    .set_bitrate_bps(5_000_000)
+            )?;
+            }
 
             // Encode the frame
             let bitstream = encoder.encode(&yuv)?;
             let mut encoded = bitstream.to_vec();
-            encoded = ensure_annexb(&encoded);
+            dump_nal_types_annexb(&encoded);
             println!("Encoded frame size: {} bytes", encoded.len());
 
             if !encoded.is_empty() {

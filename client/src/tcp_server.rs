@@ -72,31 +72,41 @@ fn calculate_viewport(win_w: u32, win_h: u32, frame_w: u32, frame_h: u32,) -> (u
     };
 }
 
-fn yuv420_to_rgba(y: &[u8], u: &[u8], v: &[u8], width: usize, height: usize) -> Vec<u8> {
-    let mut rgba = vec![0u8; width * height * 4];
+fn yuv420p_to_rgba_with_stride(
+    y: &[u8], u: &[u8], v: &[u8],
+    w: usize, h: usize,
+    y_stride: usize, u_stride: usize, v_stride: usize,
+) -> Vec<u8> {
+    let mut out = vec![0u8; w * h * 4];
+    let cw = (w + 1) / 2;
+    let ch = (h + 1) / 2;
 
-    for j in 0..height {
-        for i in 0..width {
-            let y_val = y[j * width + i] as f32;
-            let u_val = u[(j / 2) * (width / 2) + (i / 2)] as f32;
-            let v_val = v[(j / 2) * (width / 2) + (i / 2)] as f32;
+    for j in 0..h {
+        let y_row = &y[j * y_stride .. j * y_stride + w];
+        let u_row = &u[(j / 2) * u_stride .. (j / 2) * u_stride + cw];
+        let v_row = &v[(j / 2) * v_stride .. (j / 2) * v_stride + cw];
 
-            let c = y_val - 16.0;
-            let d = u_val - 128.0;
-            let e = v_val - 128.0;
+        for i in 0..w {
+            let yy = y_row[i] as f32;
+            let uu = u_row[i / 2] as f32;
+            let vv = v_row[i / 2] as f32;
+
+            let c = yy - 16.0;
+            let d = uu - 128.0;
+            let e = vv - 128.0;
 
             let r = (1.164 * c + 1.596 * e).clamp(0.0, 255.0) as u8;
             let g = (1.164 * c - 0.392 * d - 0.813 * e).clamp(0.0, 255.0) as u8;
             let b = (1.164 * c + 2.017 * d).clamp(0.0, 255.0) as u8;
 
-            let idx = (j * width + i) * 4;
-            rgba[idx] = r;
-            rgba[idx + 1] = g;
-            rgba[idx + 2] = b;
-            rgba[idx + 3] = 255;
+            let idx = (j * w + i) * 4;
+            out[idx] = r;
+            out[idx + 1] = g;
+            out[idx + 2] = b;
+            out[idx + 3] = 255;
         }
     }
-    rgba
+    out
 }
 
 //to run on local host SERVER_ADDR=127.0.0.1:7878 cargo run --release -p client
@@ -303,7 +313,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
         if let Err(e) = tls.read_exact(&mut header) {
             if e.kind() == std::io::ErrorKind::UnexpectedEof {
                 println!("Server disconnected");
-                break;
+                break Ok(());
             }
             continue;
         }
@@ -315,7 +325,42 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
 
         match msg_type {
             MessageType::FrameDelta => {
-                h264_buffer.extend_from_slice(&payload);
+                // if let Ok(Some(frame)) = decoder.decode(&payload) {
+                //     let w = frame.width() as usize;
+                //     let h = frame.height() as usize;
+                //     let rgba = yuv420_to_rgba(frame.y(), frame.u(), frame.v(), w, h);
+                //     frame_transmitter
+                //         .send(FrameUpdate::Full { w: w as u32, h: h as u32, bytes: rgba })
+                //         .ok();
+                //     let _ = proxy.send_event(UserEvent::NewUpdate);
+                // }
+                if let Ok(Some(frame)) = decoder.decode(&payload) {
+                    let w = frame.width() as usize;
+                    let h = frame.height() as usize;
+
+                    let y = frame.y();
+                    let u = frame.u();
+                    let v = frame.v();
+
+                    // --- NEW STRIDE FIX ---
+                    let y_stride = y.len() / h;
+                    let u_stride = u.len() / ((h + 1) / 2);
+                    let v_stride = v.len() / ((h + 1) / 2);
+
+                    let rgba = yuv420p_to_rgba_with_stride(
+                        y, u, v, w, h,
+                        y_stride, u_stride, v_stride
+                    );
+
+                    // OLD:
+                    // let rgba = yuv420_to_rgba(frame.y(), frame.u(), frame.v(), w, h);
+                    // --- END FIX ---
+
+                    frame_transmitter
+                        .send(FrameUpdate::Full { w: w as u32, h: h as u32, bytes: rgba })
+                        .ok();
+                    let _ = proxy.send_event(UserEvent::NewUpdate);
+                }
             },
             MessageType::FrameEnd => {
                 if h264_buffer.is_empty() {
@@ -323,10 +368,44 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
                 }
 
                 match decoder.decode(&h264_buffer) {
+                    // Ok(Some(frame)) => {
+                    //     let w = frame.width() as usize;
+                    //     let h = frame.height() as usize;
+                    //     let rgba = yuv420_to_rgba(frame.y(), frame.u(), frame.v(), w, h);
+
+                    //     frame_transmitter.send(FrameUpdate::Full {
+                    //         w: w as u32,
+                    //         h: h as u32,
+                    //         bytes: rgba,
+                    //     }).ok();
+                    //     let _ = proxy.send_event(UserEvent::NewUpdate);
+                    // }
+                    // Ok(None) => println!("Decoder waiting for complete frame"),
+                    // Err(e) => {
+                    //     eprintln!("Decode error: {:?}", e);
+                    //     decoder = Decoder::new().unwrap();
+                    // }
                     Ok(Some(frame)) => {
                         let w = frame.width() as usize;
                         let h = frame.height() as usize;
-                        let rgba = yuv420_to_rgba(frame.y(), frame.u(), frame.v(), w, h);
+
+                        let y = frame.y();
+                        let u = frame.u();
+                        let v = frame.v();
+
+                        // --- NEW STRIDE FIX ---
+                        let y_stride = y.len() / h;
+                        let u_stride = u.len() / ((h + 1) / 2);
+                        let v_stride = v.len() / ((h + 1) / 2);
+
+                        let rgba = yuv420p_to_rgba_with_stride(
+                            y, u, v, w, h,
+                            y_stride, u_stride, v_stride
+                        );
+
+                        // OLD:
+                        // let rgba = yuv420_to_rgba(frame.y(), frame.u(), frame.v(), w, h);
+                        // --- END FIX ---
 
                         frame_transmitter.send(FrameUpdate::Full {
                             w: w as u32,
@@ -337,7 +416,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
                     }
                     Ok(None) => println!("Decoder waiting for complete frame"),
                     Err(e) => {
-                        eprintln!("Decode error: {:?}", e),
+                        eprintln!("Decode error: {:?}", e);
                         decoder = Decoder::new().unwrap();
                     }
                 }
