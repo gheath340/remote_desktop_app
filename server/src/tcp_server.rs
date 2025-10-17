@@ -29,18 +29,6 @@ use openh264::{
 };
 
 
-// fn rgba_to_rgb(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
-//     let mut rgb = Vec::with_capacity(width * height * 3);
-//     for y in 0..height {
-//         for x in 0..width {
-//             let i = (y * width + x) * 4;
-//             rgb.push(rgba[i]);
-//             rgb.push(rgba[i + 1]);
-//             rgb.push(rgba[i + 2]);
-//         }
-//     }
-//     rgb
-// }
 #[inline]
 fn rgba_to_rgb_inplace(dst_rgb: &mut [u8], src_rgba: &[u8]) {
     // dst_rgb must be (width * height * 3) bytes long
@@ -79,7 +67,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     tcp.set_nodelay(true)?;
     tcp.set_read_timeout(Some(Duration::from_millis(5)))?;
     tcp.set_write_timeout(Some(Duration::from_millis(5)))?;
-    //tcp.set_nonblocking(true)?;
     // --- Create TLS stream ---
     let mut tls_conn = ServerConnection::new(tls_config.clone())?;
     loop {
@@ -136,30 +123,19 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     println!("ScreenCaptureKit capture started…");
 
     let (width, height, first_rgba) = rx.recv()?;
-    // let first_rgb = rgba_to_rgb(&first_rgba, width, height);
     let mut rgb_buf = vec![0u8; width * height * 3];
     let mut down_rgba = vec![0u8; (width / 2) * (height / 2) * 4];
 
     rgba_to_rgb_inplace(&mut rgb_buf, &first_rgba);
 
-    // Build encoder
-    // let mut encoder = Encoder::with_config(
-    //     EncoderConfig::new(width as u32, height as u32)
-    //         .max_frame_rate(30.0)
-    //         .set_bitrate_bps(5_000_000)
-    //         .debug(false)
-    // )?;
+    //build encoder
     let enc_cfg = EncoderConfig::new(width as u32, height as u32)
         .max_frame_rate(30.0)
         .set_bitrate_bps(8_000_000)
         .rate_control_mode(RateControlMode::Bitrate);
-
     let mut encoder = Encoder::with_config(enc_cfg)?;
 
-    // Convert directly to YUV (the library handles RGB→YUV internally)
-    //let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &first_rgba);
     let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb_buf);
-
 
     // Encode the frame
     let bitstream = encoder.encode(&yuv)?;
@@ -193,7 +169,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
             let (enc_w, enc_h, rgb_src_slice) = if width > 1920 {
                 // pre-allocate once outside the loop:
-                // let mut down_rgba = vec![0u8; (width/2)*(height/2)*4];
                 let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, width, height);
                 // pre-alloc once: let mut rgb_buf = vec![0u8; nw*nh*3];
                 rgba_to_rgb_inplace(&mut rgb_buf[0..nw*nh*3], &down_rgba[0..nw*nh*4]);
@@ -215,8 +190,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
                 frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
             }
         }
-
-        //thread::sleep(std::time::Duration::from_millis(16));
     }
 }
 
