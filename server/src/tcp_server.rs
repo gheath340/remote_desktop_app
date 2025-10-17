@@ -63,6 +63,19 @@ fn rgba_to_rgb(rgba: &[u8]) -> Vec<u8> {
     rgb
 }
 
+// Utility: ensure Annex B stream format for decoder compatibility
+fn ensure_annexb(encoded: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(encoded.len() + 4);
+    let mut i = 0;
+    while i + 4 <= encoded.len() {
+        let nal_len = u32::from_be_bytes(encoded[i..i + 4].try_into().unwrap()) as usize;
+        out.extend_from_slice(&[0, 0, 0, 1]);
+        out.extend_from_slice(&encoded[i + 4..i + 4 + nal_len]);
+        i += 4 + nal_len;
+    }
+    out
+}
+
 //TO RUN YDOTOOLD(to allow for mouse and keyboard input) run "~/bin/ydotool_session.sh" in empty terminal window
 //run "sudo pkill -f ydotoold" to stop ydotoold
 fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn std::error::Error>> {
@@ -198,7 +211,8 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
 
             // Encode the frame
             let bitstream = encoder.encode(&yuv)?;
-            let encoded = bitstream.to_vec();
+            let mut encoded = bitstream.to_vec();
+            encoded = ensure_annexb(&encoded);
             println!("Encoded frame size: {} bytes", encoded.len());
 
             if !encoded.is_empty() {
