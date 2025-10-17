@@ -29,18 +29,28 @@ use openh264::{
 };
 
 
-fn rgba_to_rgb(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
-    let mut rgb = Vec::with_capacity(width * height * 3);
-    for y in 0..height {
-        for x in 0..width {
-            let i = (y * width + x) * 4;
-            rgb.push(rgba[i]);
-            rgb.push(rgba[i + 1]);
-            rgb.push(rgba[i + 2]);
-        }
+// fn rgba_to_rgb(rgba: &[u8], width: usize, height: usize) -> Vec<u8> {
+//     let mut rgb = Vec::with_capacity(width * height * 3);
+//     for y in 0..height {
+//         for x in 0..width {
+//             let i = (y * width + x) * 4;
+//             rgb.push(rgba[i]);
+//             rgb.push(rgba[i + 1]);
+//             rgb.push(rgba[i + 2]);
+//         }
+//     }
+//     rgb
+// }
+#[inline]
+fn rgba_to_rgb_inplace(dst_rgb: &mut [u8], src_rgba: &[u8]) {
+    // dst_rgb must be (width * height * 3) bytes long
+    let mut di = 0;
+    for chunk in src_rgba.chunks_exact(4) {
+        dst_rgb[di..di + 3].copy_from_slice(&chunk[0..3]);
+        di += 3;
     }
-    rgb
 }
+
 
 //TO RUN YDOTOOLD(to allow for mouse and keyboard input) run "~/bin/ydotool_session.sh" in empty terminal window
 //run "sudo pkill -f ydotoold" to stop ydotoold
@@ -105,7 +115,9 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     println!("ScreenCaptureKit capture started…");
 
     let (width, height, first_rgba) = rx.recv()?;
-    let first_rgb = rgba_to_rgb(&first_rgba, width, height);
+    // let first_rgb = rgba_to_rgb(&first_rgba, width, height);
+    let mut rgb_buf = vec![0u8; width * height * 3];
+    rgba_to_rgb_inplace(&mut rgb_buf, &first_rgba);
 
     // Build encoder
     // let mut encoder = Encoder::with_config(
@@ -122,7 +134,9 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     let mut encoder = Encoder::with_config(enc_cfg)?;
 
     // Convert directly to YUV (the library handles RGB→YUV internally)
-    let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &first_rgb);
+    //let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &first_rgba);
+    let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb_buf);
+
 
     // Encode the frame
     let bitstream = encoder.encode(&yuv)?;
@@ -152,9 +166,12 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
                 println!("✅ Frame size OK: {} bytes ({}x{})", rgba.len(), width, height);
             }
             let t_encode = Instant::now();
-            let rgb = rgba_to_rgb(&rgba, width, height);
+            //let rgb = rgba_to_rgb(&rgba, width, height);
+            rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
 
-            let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb);
+            // let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb);
+            let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb_buf);
+
 
             // Encode the frame
             let bitstream = encoder.encode(&yuv)?;
