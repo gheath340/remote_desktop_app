@@ -19,11 +19,9 @@ use winit::{
     event::{ Event, WindowEvent },
     window::WindowBuilder,
  };
-use pixels::{ SurfaceTexture, Pixels };
+use pixels::{ SurfaceTexture, Pixels, PixelsBuilder, };
 use crate::{ message_type_handlers, };
 use lz4_flex::decompress_size_prepended;
-//use pixels::wgpu::SurfaceSize;
-use pixels::wgpu;
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 
@@ -182,6 +180,8 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //create surface and attatch pixels to it
     let surface_texture = SurfaceTexture::new(width, height, &window);
     let mut pixels = Pixels::new(width, height, surface_texture)?;
+    let win_size = window.inner_size();
+    pixels.resize_surface(win_size.width, win_size.height).unwrap();
 
     //put image into pixels to display on window
     {
@@ -236,12 +236,12 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             //window.request_redraw() calls this to redraw window
             Event::RedrawRequested(_) => {
                 // Always resize the pixel surface to match window
-                let win_size = window.inner_size();
+                //let win_size = window.inner_size();
 
                 // This makes the frame scale to fill the window
-                if let Err(e) = pixels.resize_surface(win_size.width, win_size.height) {
-                    eprintln!("Resize surface error: {e}");
-                }
+                // if let Err(e) = pixels.resize_surface(win_size.width, win_size.height) {
+                //     eprintln!("Resize surface error: {e}");
+                // }
 
                 // Draw the scaled frame
                 if let Err(e) = pixels.render() {
@@ -267,10 +267,10 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     let win_h = win_size.height as f64;
 
                     //get remote screen dimensions
-                    let sx = ((position.x / win_w) * width as f64)
+                    let sx = ((position.x / win_w as f64) * width as f64)
                         .round()
                         .clamp(0.0, (width - 1) as f64) as u32;
-                    let sy = ((position.y / win_h) * height as f64)
+                    let sy = ((position.y / win_h as f64) * height as f64)
                         .round()
                         .clamp(0.0, (height - 1) as f64) as u32;
 
@@ -279,14 +279,20 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     let _ = mouse_transmitter.send(packet);
                 },
                 WindowEvent::Resized(size) => {
-                    let (vw, vh) = calculate_viewport(size.width, size.height, width, height);
-                    pixels.resize_surface(vw, vh).unwrap();
-                    window.request_redraw();
+                    //let (vw, vh) = calculate_viewport(size.width, size.height, width, height);
+                    //pixels.resize_surface(vw, vh).unwrap();
+                    if size.width > 0 && size.height > 0{
+                        pixels.resize_surface(size.width, size.height).unwrap();
+                        window.request_redraw();
+                    }
                 },
                 WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                    let (vw, vh) = calculate_viewport(new_inner_size.width, new_inner_size.height, width, height);
-                    pixels.resize_surface(vw, vh).unwrap();
-                    window.request_redraw();
+                    //let (vw, vh) = calculate_viewport(new_inner_size.width, new_inner_size.height, width, height);
+                    //pixels.resize_surface(vw, vh).unwrap();
+                    if new_inner_size.width > 0 && new_inner_size.height > 0{
+                        pixels.resize_surface(new_inner_size.width, new_inner_size.height).unwrap();
+                        window.request_redraw();
+                    }
                 }
                 _ => {}
             },

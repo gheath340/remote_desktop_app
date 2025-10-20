@@ -347,7 +347,7 @@ dependencies = [
  "common",
  "image 0.24.9",
  "lz4_flex",
- "openh264",
+ "openh264 0.3.2",
  "pixels",
  "rustls",
  "rustls-pemfile",
@@ -1426,7 +1426,16 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6f884c2b7f72ebf4e06a28b88cefa43085da71345d5595d6ec17a0f79e13b2"
 dependencies = [
- "openh264-sys2",
+ "openh264-sys2 0.3.2",
+]
+
+[[package]]
+name = "openh264"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e42e632449bb36c5593e4cde7324ed0b93c00d971cea140da60ee8ae04a3dae7"
+dependencies = [
+ "openh264-sys2 0.4.4",
 ]
 
 [[package]]
@@ -1434,6 +1443,17 @@ name = "openh264-sys2"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "171fdb16e88a11b400d5b41c275f69f65f6e63e2920152621a99c3c2dc50ec4a"
+dependencies = [
+ "cc",
+ "nasm-rs",
+ "walkdir",
+]
+
+[[package]]
+name = "openh264-sys2"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7626c49bfd4e268dea1d3660bc27f2f47765a0ee274060c8c0d62aa3b46a8c7b"
 dependencies = [
  "cc",
  "nasm-rs",
@@ -1853,7 +1873,7 @@ dependencies = [
  "image 0.24.9",
  "lz4_flex",
  "objc",
- "openh264",
+ "openh264 0.4.4",
  "rustls",
  "rustls-pemfile",
  "scrap",

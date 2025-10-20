@@ -67,6 +67,8 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     tcp.set_nodelay(true)?;
     tcp.set_read_timeout(Some(Duration::from_millis(5)))?;
     tcp.set_write_timeout(Some(Duration::from_millis(5)))?;
+    // tcp.set_send_buffer_size(1_000_000)?;
+    // tcp.set_recv_buffer_size(1_000_000)?;
     // --- Create TLS stream ---
     let mut tls_conn = ServerConnection::new(tls_config.clone())?;
     loop {
@@ -131,7 +133,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     //build encoder
     let enc_cfg = EncoderConfig::new(width as u32, height as u32)
         .max_frame_rate(30.0)
-        .set_bitrate_bps(8_000_000)
+        .set_bitrate_bps(10_000_000)
         .rate_control_mode(RateControlMode::Bitrate);
     let mut encoder = Encoder::with_config(enc_cfg)?;
 
@@ -159,11 +161,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
         }
 
         if let Some((_, _, rgba)) = latest {
-            if rgba.len() != width * height * 4 {
-                eprintln!( "⚠️ Frame size mismatch: rgba.len() = {}, expected = {} ({}x{})",rgba.len(),width * height * 4,width,height);
-            } else {
-                println!("✅ Frame size OK: {} bytes ({}x{})", rgba.len(), width, height);
-            }
             let t_encode = Instant::now();
             //let rgb = rgba_to_rgb(&rgba, width, height);
             rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
@@ -290,13 +287,11 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
             }
             Err(e) => return Err(Box::new(e)),
         }
-        std::thread::sleep(Duration::from_micros(500));
+        //std::thread::sleep(Duration::from_micros(500));
     }
 }
 
 pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8],) -> Result<(), Box<dyn std::error::Error>> {
-    let timer = Instant::now();
-
     // Build a single contiguous buffer (header + payload)
     let mut buf = Vec::with_capacity(5 + payload.len());
     buf.push(msg_type.to_u8());
@@ -319,16 +314,11 @@ pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &
                 Err(e) => return Err(Box::new(e)),
             }
         }
-        if retries > 0 {
-            println!("WouldBlock retried {retries} times while writing {} bytes", data.len());
-        }
         Ok(())
     };
 
     // Single TLS record write — no multi-part small writes
     write_all_retry(&buf)?;
     let _ = stream.flush();
-
-    println!("send_response done in {}ms", timer.elapsed().as_millis());
     Ok(())
 }
