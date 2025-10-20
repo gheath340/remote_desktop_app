@@ -19,7 +19,7 @@ use winit::{
     event::{ Event, WindowEvent },
     window::WindowBuilder,
  };
-use pixels::{ SurfaceTexture, Pixels, PixelsBuilder, wgpu};
+use pixels::{ SurfaceTexture, Pixels, PixelsBuilder, wgpu };
 use crate::{ message_type_handlers, };
 use lz4_flex::decompress_size_prepended;
 use openh264::decoder::Decoder;
@@ -112,11 +112,11 @@ fn yuv420p_to_rgba_with_stride(
 //to run on vm at work comment out other _address vars  and change connection_address to vm_work_address.clone()
 //to run on desktop comment out other _address vars and change connection_address to home_desktop_address.clone()
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
-    //let home_desktop_address = "192.168.50.105:7878".to_string();
+    let home_desktop_address = "192.168.50.105:7878".to_string();
     //let vm_home_address = "192.168.50.209:7878".to_string();
     let vm_work_address = "10.176.7.73:7878".to_string();
     //allow for server address override by calling "SERVER_ADDR=<address> cargo run -p client"
-    let connection_address = env::var("SERVER_ADDR").unwrap_or(vm_work_address.clone());
+    let connection_address = env::var("SERVER_ADDR").unwrap_or(home_desktop_address.clone());
     println!("Connecting to server at {}", connection_address);
 
     //create the UI, main thread loop
@@ -178,11 +178,9 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         .build(&event_loop)?;
 
     //create surface and attatch pixels to it
-    let surface_texture = SurfaceTexture::new(width, height, &window);
-    let mut pixels = Pixels::new(width, height, surface_texture)?;
-    pixels.clear_color(wgpu::Color::BLACK);
-
     let win_size = window.inner_size();
+    let surface_texture = SurfaceTexture::new(win_size.width, win_size.height, &window);
+    let mut pixels = Pixels::new(win_size.width, win_size.height, surface_texture)?;
     pixels.resize_surface(win_size.width, win_size.height).unwrap();
 
     //put image into pixels to display on window
@@ -238,31 +236,9 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             //window.request_redraw() calls this to redraw window
             Event::RedrawRequested(_) => {
                 // Draw the scaled frame
-                // if let Err(e) = pixels.render() {
-                //     eprintln!("Render error: {e}");
-                // }
-                if let Err(e) = pixels.render_with(|encoder, render_target, context| {
-                        // Clear background manually
-                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: Some("clear pass"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: render_target,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: true,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                        });
-                        drop(pass); // end pass before rendering
-
-                        // Draw the frame scaled to fit the window
-                        context.scaling_renderer.render(encoder, render_target);
-                        Ok(())
-                    }) {
-                        eprintln!("Render error: {e}");
-                    }
+                if let Err(e) = pixels.render() {
+                    eprintln!("Render error: {e}");
+                }
 
                 frame_count += 1;
                 if last_frame.elapsed() >= Duration::from_secs(1) {
@@ -277,36 +253,56 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
 
                 //handle cursor being moved
                 WindowEvent::CursorMoved { position, .. } => {
-                    //get window size
-                    let win_size = window.inner_size();
+                    // //get window size
+                    // let win_size = window.inner_size();
+                    // let win_w = win_size.width as f64;
+                    // let win_h = win_size.height as f64;
+
+                    // //get remote screen dimensions
+                    // let sx = ((position.x / win_w as f64) * width as f64)
+                    //     .round()
+                    //     .clamp(0.0, (width - 1) as f64) as u32;
+                    // let sy = ((position.y / win_h as f64) * height as f64)
+                    //     .round()
+                    //     .clamp(0.0, (height - 1) as f64) as u32;
+
+                    // //build packet and send it
+                    // let packet = make_mouse_move_packet(sx, sy);
+                    // let _ = mouse_transmitter.send(packet);
+                    let scale = window.scale_factor() as f64; // logical -> physical
+                    let pos_x_px = position.x * scale;
+                    let pos_y_px = position.y * scale;
+
+                    let win_size = window.inner_size(); // physical
                     let win_w = win_size.width as f64;
                     let win_h = win_size.height as f64;
 
-                    //get remote screen dimensions
-                    let sx = ((position.x / win_w as f64) * width as f64)
+                    // since we stretch to fill, map directly
+                    let sx = ((pos_x_px / win_w) * width as f64)
                         .round()
                         .clamp(0.0, (width - 1) as f64) as u32;
-                    let sy = ((position.y / win_h as f64) * height as f64)
+                    let sy = ((pos_y_px / win_h) * height as f64)
                         .round()
                         .clamp(0.0, (height - 1) as f64) as u32;
 
-                    //build packet and send it
                     let packet = make_mouse_move_packet(sx, sy);
                     let _ = mouse_transmitter.send(packet);
                 },
                 WindowEvent::Resized(size) => {
-                    //let (vw, vh) = calculate_viewport(size.width, size.height, width, height);
-                    //pixels.resize_surface(vw, vh).unwrap();
-                    if size.width > 0 && size.height > 0{
-                        pixels.resize_surface(size.width, size.height).unwrap();
+                    if size.width > 0 && size.height > 0 {
+                        let surface_texture = SurfaceTexture::new(size.width, size.height, &window);
+                        pixels = PixelsBuilder::new(size.width, size.height, surface_texture)
+                            .build()
+                            .unwrap();
                         window.request_redraw();
                     }
                 },
                 WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                    //let (vw, vh) = calculate_viewport(new_inner_size.width, new_inner_size.height, width, height);
-                    //pixels.resize_surface(vw, vh).unwrap();
-                    if new_inner_size.width > 0 && new_inner_size.height > 0{
-                        pixels.resize_surface(new_inner_size.width, new_inner_size.height).unwrap();
+                    if new_inner_size.width > 0 && new_inner_size.height > 0 {
+                        let surface_texture = SurfaceTexture::new(new_inner_size.width, new_inner_size.height, &window);
+                        pixels = PixelsBuilder::new(new_inner_size.width, new_inner_size.height, surface_texture)
+                            .build()
+                            .unwrap();
                         window.request_redraw();
                     }
                 }

@@ -1,4 +1,6 @@
 use std::error::Error;
+use image::{ImageBuffer, Rgba, imageops::resize, imageops::FilterType};
+
 
 pub fn handle_text(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
     println!("Text message: {:?}", String::from_utf8_lossy(payload));
@@ -25,21 +27,28 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
 }
 
 pub fn handle_frame_full(width: u32, height: u32, payload: &[u8], pixels: &mut pixels::Pixels) -> Result<(), Box<dyn Error>> {
-    //get the window dimensions and frame
+    // let frame = pixels.frame_mut();
+
+    // if payload.len() != (width as usize) * (height as usize) * 4 {
+    //     return Err("FrameFull pixel data length mismatch".into());
+    // }
+
+    // //add image data to frame to display image
+    // frame.copy_from_slice(payload);
     let extent = pixels.texture().size();
+    let disp_w = extent.width;
+    let disp_h = extent.height;
+
+    // 2. Build ImageBuffer from the raw RGBA bytes
+    let img = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, payload.to_vec())
+        .ok_or("Invalid frame buffer")?;
+
+    // 3. Scale it to fit the display surface
+    let scaled = resize(&img, disp_w, disp_h, FilterType::Triangle);
+
+    // 4. Write directly into pixel buffer
     let frame = pixels.frame_mut();
-
-    if width != extent.width || height != extent.height {
-        println!("Frame size {} {} does not match window size {} {}", width, height, extent.width, extent.height);
-        return Ok(());
-    }
-
-    if payload.len() != (width as usize) * (height as usize) * 4 {
-        return Err("FrameFull pixel data length mismatch".into());
-    }
-
-    //add image data to frame to display image
-    frame.copy_from_slice(payload);
+    frame.copy_from_slice(&scaled);
     Ok(())
 }
 
