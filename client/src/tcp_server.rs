@@ -162,7 +162,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         }
     });
 
-    //looping until the channel recieves a full frame update from dispatcher thread
+    //loop until the first full image is recieved and grab the image vec and dimensions
     let (width, height, first_rgba) = loop {
         match frame_receiver.recv()? {
             FrameUpdate::Full{ w, h, bytes } => break (w, h, bytes),
@@ -177,13 +177,15 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         .with_title("Remote desktop client")
         .build(&event_loop)?;
 
-    //create surface and attatch pixels to it
+    //get the size of the initial windows drawable area
     let win_size = window.inner_size();
+    //create a gpu-backed surface linked to the window
     let surface_texture = SurfaceTexture::new(win_size.width, win_size.height, &window);
+    //creates the pixels renderer that manages the cpu frame buffer(RGBA bytes) and the GPU pipeline that actually uploads and draws to the window
     let mut pixels = Pixels::new(win_size.width, win_size.height, surface_texture)?;
-    pixels.resize_surface(win_size.width, win_size.height).unwrap();
 
-    //put image into pixels to display on window
+    //handle_frame_full puts the image into the pixels buffer
+    //pixels.render draws whats in the pixels buffer onto the screen
     {
         message_type_handlers::handle_frame_full(width, height, &first_rgba, &mut pixels)?;
         pixels.render().unwrap();
@@ -195,10 +197,10 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
 
     //run eventloop to correctly handle everything
     event_loop.run(move |event, _, control_flow| {
-        //*control_flow = ControlFlow::Wait;
+        //tells the event loop to run every 16ms, whether something triggered it or not
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16));
 
-     let pixel_render_timer = Instant::now();
+        let pixel_render_timer = Instant::now();
 
         //handle all UserEvent types
         match event {
@@ -269,40 +271,43 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     // //build packet and send it
                     // let packet = make_mouse_move_packet(sx, sy);
                     // let _ = mouse_transmitter.send(packet);
-                    let scale = window.scale_factor() as f64; // logical -> physical
+
+                    //gets the DPI scale(how many physical pixels each logical pixel is)
+                    let scale = window.scale_factor() as f64;
+                    //position.x & y are in logical pixels, * by scale to convert to physical pixels
                     let pos_x_px = position.x * scale;
                     let pos_y_px = position.y * scale;
 
-                    let win_size = window.inner_size(); // physical
+                    //window size in physical pixels
+                    let win_size = window.inner_size();
                     let win_w = win_size.width as f64;
                     let win_h = win_size.height as f64;
 
-                    // since we stretch to fill, map directly
+                    //(pos_x_px / win_w) gives normalized mouse x (0.0 to 1.0) * by width to get actual x position
+                    //round ensures no fractions clamp ensures its within valid boundaries
                     let sx = ((pos_x_px / win_w) * width as f64)
                         .round()
                         .clamp(0.0, (width - 1) as f64) as u32;
+                    //(pos_y_px / win_h) gives normalized mouse y (0.0 to 1.0) * by height to get actual y position
+                    //round ensures no fractions clamp ensures its within valid boundaries
                     let sy = ((pos_y_px / win_h) * height as f64)
                         .round()
                         .clamp(0.0, (height - 1) as f64) as u32;
-
+                    //builds proper mouse packet to be sent to dispatcher
                     let packet = make_mouse_move_packet(sx, sy);
+                    //sends to dispatcher
                     let _ = mouse_transmitter.send(packet);
                 },
                 WindowEvent::Resized(size) => {
+                    //if size actually changed resize the surface and redraw the window
                     if size.width > 0 && size.height > 0 {
-                        let surface_texture = SurfaceTexture::new(size.width, size.height, &window);
-                        pixels = PixelsBuilder::new(size.width, size.height, surface_texture)
-                            .build()
-                            .unwrap();
-                        window.request_redraw();
-                    }
-                },
+                            pixels.resize_surface(size.width, size.height).unwrap();
+                            window.request_redraw();
+                        }                },
                 WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                    //if size actually changed resize the surface and redraw the window
                     if new_inner_size.width > 0 && new_inner_size.height > 0 {
-                        let surface_texture = SurfaceTexture::new(new_inner_size.width, new_inner_size.height, &window);
-                        pixels = PixelsBuilder::new(new_inner_size.width, new_inner_size.height, surface_texture)
-                            .build()
-                            .unwrap();
+                        pixels.resize_surface(new_inner_size.width, new_inner_size.height).unwrap();
                         window.request_redraw();
                     }
                 }

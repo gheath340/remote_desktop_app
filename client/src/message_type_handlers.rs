@@ -35,24 +35,19 @@ pub fn handle_frame_full(width: u32, height: u32, payload: &[u8], pixels: &mut p
 
     // //add image data to frame to display image
     // frame.copy_from_slice(payload);
-    let extent = pixels.texture().size();
-    let disp_w = extent.width;
-    let disp_h = extent.height;
 
-    // 2. Build ImageBuffer from the raw RGBA bytes
+    //THIS CODE REALLY ONLY IS NECESSARY OVER THE COMMENTED OUT CODE IF SOMETHING ELSE IN THE CODE IS BROKEN
+    //get the current display area size
+    let extent = pixels.texture().size();
+
+    //build ImageBuffer from the raw RGBA bytes
     let img = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, payload.to_vec())
         .ok_or("Invalid frame buffer")?;
 
-    // 3. Scale it to fit the display surface
-    let scaled = resize(&img, disp_w, disp_h, FilterType::Triangle);
+    //scale it to fit the actual display surface
+    let scaled = resize(&img, extent.width, extent.height, FilterType::Triangle);
 
-        // Clear the frame (avoid tiled leftovers)
-    let frame = pixels.frame_mut();
-    for chunk in frame.chunks_exact_mut(4) {
-        chunk.copy_from_slice(&[0, 0, 0, 255]); // opaque black
-    }
-
-    // 4. Write directly into pixel buffer
+    //write directly into pixel buffer
     let frame = pixels.frame_mut();
     frame.copy_from_slice(&scaled);
     Ok(())

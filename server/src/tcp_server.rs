@@ -67,8 +67,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     tcp.set_nodelay(true)?;
     tcp.set_read_timeout(Some(Duration::from_millis(5)))?;
     tcp.set_write_timeout(Some(Duration::from_millis(5)))?;
-    // tcp.set_send_buffer_size(1_000_000)?;
-    // tcp.set_recv_buffer_size(1_000_000)?;
+
     // --- Create TLS stream ---
     let mut tls_conn = ServerConnection::new(tls_config.clone())?;
     loop {
@@ -120,66 +119,103 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     }
     });
 
-    // --- Start ScreenCaptureKit capture ---
+    //start ScreenCaptureKit capture
     let rx = start_sck_stream();
     println!("ScreenCaptureKit capture started…");
 
+    //get first image and the images width/height
     let (width, height, first_rgba) = rx.recv()?;
+    //create an empty vec with dimensions of first image as RGB
     let mut rgb_buf = vec![0u8; width * height * 3];
+    //create an empty vec with dimensions of first image downscaled
     let mut down_rgba = vec![0u8; (width / 2) * (height / 2) * 4];
 
+    //create rgb of first image
     rgba_to_rgb_inplace(&mut rgb_buf, &first_rgba);
 
-    //build encoder
+    //set current encoder dimensions
+    let mut current_enc_w = width;
+    let mut current_enc_h = height;
+
+    //set h.264 encoder configuration then build encoder with that config
     let enc_cfg = EncoderConfig::new(width as u32, height as u32)
         .max_frame_rate(30.0)
         .set_bitrate_bps(10_000_000)
         .rate_control_mode(RateControlMode::Bitrate);
     let mut encoder = Encoder::with_config(enc_cfg)?;
 
+    //converts rgb image into yuv420 format
     let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb_buf);
 
-    // Encode the frame
+    //compresses yuv image into bitstream
     let bitstream = encoder.encode(&yuv)?;
+    //clones bitstream into vec<u8> so it can be sent over TLS
     let encoded_bytes = bitstream.to_vec();
 
-    // Send it to client
+    //sends info to frame_receiver
     frame_transmitter.send((MessageType::FrameDelta, encoded_bytes))?;
     frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
 
-    // Initialize prev_frame with the first frame so deltas work
+    //initialize prev_frame with the first frame
     let mut prev_frame = first_rgba;
 
     loop {
         let loop_timer = Instant::now();
         let mut latest = None;
 
-        // drain the capture channel and keep only the latest frame
         let timer1 = Instant::now();
+        // drain the capture channel and keep only the latest frame
         while let Ok(frame) = rx.try_recv() {
             latest = Some(frame);
         }
 
         if let Some((_, _, rgba)) = latest {
             let t_encode = Instant::now();
-            //let rgb = rgba_to_rgb(&rgba, width, height);
-            rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
+            // rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
+            // let (enc_w, enc_h, rgb_src_slice) = if width > 1920 {
+            //     // pre-allocate once outside the loop:
+            //     let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, width, height);
+            //     // pre-alloc once: let mut rgb_buf = vec![0u8; nw*nh*3];
+            //     rgba_to_rgb_inplace(&mut rgb_buf[0..nw*nh*3], &down_rgba[0..nw*nh*4]);
+            //     (nw, nh, &rgb_buf[0..nw*nh*3])
+            // } else {
+            //     // pre-alloc once: let mut rgb_buf = vec![0u8; width*height*3];
+            //     rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
+            //     (width, height, &rgb_buf[..])
+            // };
+
+            // // let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb);
+            // let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb_buf);
+            // // Encode the frame
+            // let bitstream = encoder.encode(&yuv)?;
             let (enc_w, enc_h, rgb_src_slice) = if width > 1920 {
-                // pre-allocate once outside the loop:
+                //downacale the latest image from screencapture
                 let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, width, height);
-                // pre-alloc once: let mut rgb_buf = vec![0u8; nw*nh*3];
+                // convert the downscaled RGBA to RGB
                 rgba_to_rgb_inplace(&mut rgb_buf[0..nw*nh*3], &down_rgba[0..nw*nh*4]);
                 (nw, nh, &rgb_buf[0..nw*nh*3])
             } else {
-                // pre-alloc once: let mut rgb_buf = vec![0u8; width*height*3];
+                // convert the full RGBA to RGB
                 rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
                 (width, height, &rgb_buf[..])
             };
 
-            // let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb);
-            let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb_buf);
-            // Encode the frame
+            //if the current encoder isnt the correct size, recreate encoder
+            if current_enc_w != enc_w || current_enc_h != enc_h {
+                println!("Re-creating encoder for new resolution: {}x{}", enc_w, enc_h);
+                let enc_cfg = EncoderConfig::new(enc_w as u32, enc_h as u32)
+                    .max_frame_rate(30.0)
+                    .set_bitrate_bps(10_000_000)
+                    .rate_control_mode(RateControlMode::Bitrate);
+                encoder = Encoder::with_config(enc_cfg)?;
+                current_enc_w = enc_w;
+                current_enc_h = enc_h;
+            }
+            //change rgb image to yuv
+            let yuv = YUVBuffer::with_rgb(enc_w, enc_h, rgb_src_slice);
+            //compress yuv image
             let bitstream = encoder.encode(&yuv)?;
+            //turn bitstream into sendable ve<u8>
             let mut encoded = bitstream.to_vec();
 
             if !encoded.is_empty() {
@@ -242,19 +278,19 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
     let mut header = [0u8; 5];
 
     loop {
-
         let mut sent_any = false;
+        //if frame was tramsitted from main loop, send it to client
         while let Ok((msg_type, payload)) = frame_receiver.try_recv() {
             send_response(tls, msg_type, &payload)?;
             sent_any = true;
         }
 
-        // If we sent frames, go right back to loop to drain more quickly
+        // If we sent frames, go right back to loop to drain quickly
         if sent_any {
             continue;
         }
 
-        // 2. Try to read, but don't block forever
+        //Try to read, but don't block forever
         match tls.read(&mut header) {
             Ok(0) => {
                 println!("Client disconnected");
@@ -265,13 +301,12 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
                 continue;
             }
             Ok(_) => {
-                // read payload normally
+                // read payload and send to match to get handled properly
                 let msg_type = MessageType::from_u8(header[0]);
                 let payload_len =
                     u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
                 let mut payload = vec![0u8; payload_len as usize];
                 tls.read_exact(&mut payload)?;
-
                 handle_incoming_message(msg_type, &payload)?;
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
@@ -292,13 +327,14 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
 }
 
 pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &[u8],) -> Result<(), Box<dyn std::error::Error>> {
-    // Build a single contiguous buffer (header + payload)
+    //build a single buffer (header + payload)
     let mut buf = Vec::with_capacity(5 + payload.len());
     buf.push(msg_type.to_u8());
     buf.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     buf.extend_from_slice(payload);
 
-    // Helper closure to handle WouldBlock with retries
+    //closure to handle WouldBlock
+    //keeps retrying until all bytes are written
     let mut write_all_retry = |data: &[u8]| -> Result<(), Box<dyn std::error::Error>> {
         let mut offset = 0;
         let mut retries = 0;
@@ -317,7 +353,7 @@ pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &
         Ok(())
     };
 
-    // Single TLS record write — no multi-part small writes
+    //send the message to client
     write_all_retry(&buf)?;
     let _ = stream.flush();
     Ok(())
