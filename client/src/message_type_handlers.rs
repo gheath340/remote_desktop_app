@@ -46,6 +46,12 @@ pub fn handle_frame_full(width: u32, height: u32, payload: &[u8], pixels: &mut p
     // 3. Scale it to fit the display surface
     let scaled = resize(&img, disp_w, disp_h, FilterType::Triangle);
 
+        // Clear the frame (avoid tiled leftovers)
+    let frame = pixels.frame_mut();
+    for chunk in frame.chunks_exact_mut(4) {
+        chunk.copy_from_slice(&[0, 0, 0, 255]); // opaque black
+    }
+
     // 4. Write directly into pixel buffer
     let frame = pixels.frame_mut();
     frame.copy_from_slice(&scaled);
