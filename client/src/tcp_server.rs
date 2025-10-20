@@ -19,7 +19,7 @@ use winit::{
     event::{ Event, WindowEvent },
     window::WindowBuilder,
  };
-use pixels::{ SurfaceTexture, Pixels, PixelsBuilder, };
+use pixels::{ SurfaceTexture, Pixels, PixelsBuilder, wgpu};
 use crate::{ message_type_handlers, };
 use lz4_flex::decompress_size_prepended;
 use openh264::decoder::Decoder;
@@ -180,6 +180,8 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //create surface and attatch pixels to it
     let surface_texture = SurfaceTexture::new(width, height, &window);
     let mut pixels = Pixels::new(width, height, surface_texture)?;
+    pixels.clear_color(wgpu::Color::BLACK);
+
     let win_size = window.inner_size();
     pixels.resize_surface(win_size.width, win_size.height).unwrap();
 
@@ -235,18 +237,32 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             }
             //window.request_redraw() calls this to redraw window
             Event::RedrawRequested(_) => {
-                // Always resize the pixel surface to match window
-                //let win_size = window.inner_size();
-
-                // This makes the frame scale to fill the window
-                // if let Err(e) = pixels.resize_surface(win_size.width, win_size.height) {
-                //     eprintln!("Resize surface error: {e}");
-                // }
-
                 // Draw the scaled frame
-                if let Err(e) = pixels.render() {
-                    eprintln!("Render error: {e}");
-                }
+                // if let Err(e) = pixels.render() {
+                //     eprintln!("Render error: {e}");
+                // }
+                if let Err(e) = pixels.render_with(|encoder, render_target, context| {
+                        // Clear background manually
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("clear pass"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: render_target,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                    store: true,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                        });
+                        drop(pass); // end pass before rendering
+
+                        // Draw the frame scaled to fit the window
+                        context.scaling_renderer.render(encoder, render_target);
+                        Ok(())
+                    }) {
+                        eprintln!("Render error: {e}");
+                    }
 
                 frame_count += 1;
                 if last_frame.elapsed() >= Duration::from_secs(1) {
