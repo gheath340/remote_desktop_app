@@ -19,7 +19,7 @@ use winit::{
     event::{ Event, WindowEvent },
     window::WindowBuilder,
  };
-use pixels::{ SurfaceTexture, Pixels, PixelsBuilder, wgpu };
+use pixels::{ SurfaceTexture, Pixels, PixelsBuilder, wgpu, };
 use crate::{ message_type_handlers, };
 use lz4_flex::decompress_size_prepended;
 use openh264::decoder::Decoder;
@@ -158,6 +158,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //build window
     let window = WindowBuilder::new()
         .with_title("Remote desktop client")
+        .with_inner_size(winit::dpi::LogicalSize::new(width, height))
         .build(&event_loop)?;
 
     //get the size of the initial windows drawable area
@@ -165,7 +166,9 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //create a gpu-backed surface linked to the window
     let surface_texture = SurfaceTexture::new(win_size.width, win_size.height, &window);
     //creates the pixels renderer that manages the cpu frame buffer(RGBA bytes) and the GPU pipeline that actually uploads and draws to the window
+                    //THIS CHANGE JUST SKYROCKETED THE FRAME RECEIVER TIMER!!!!!!!!!!!
     let mut pixels = Pixels::new(win_size.width, win_size.height, surface_texture)?;
+    //let mut pixels = Pixels::new(width, height, surface_texture)?;
 
     //handle_frame_full puts the image into the pixels buffer
     //pixels.render draws whats in the pixels buffer onto the screen
@@ -183,15 +186,15 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         //tells the event loop to run every 16ms, whether something triggered it or not
         *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16));
 
-        let pixel_render_timer = Instant::now();
-
         //handle all UserEvent types
         match event {
             //handle UserEven::NewUpdates
             Event::UserEvent(UserEvent::NewUpdate) => {
                 //check reciever for updates and send to the correct FrameUpdate
                 let mut got_any = false;
+                let t0 = Instant::now();
                 while let Ok(update) = frame_receiver.try_recv() {
+                    println!("Frame recieve timer: {}ms", t0.elapsed().as_millis());
                     match update {
                         //call handle_frame_full when FrameUpdate::Full
                         FrameUpdate::Full{w, h, bytes} => {
@@ -220,7 +223,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             }
             //window.request_redraw() calls this to redraw window
             Event::RedrawRequested(_) => {
-                // Draw the scaled frame
+                //draw the scaled frame
                 if let Err(e) = pixels.render() {
                     eprintln!("Render error: {e}");
                 }
@@ -238,23 +241,6 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
 
                 //handle cursor being moved
                 WindowEvent::CursorMoved { position, .. } => {
-                    // //get window size
-                    // let win_size = window.inner_size();
-                    // let win_w = win_size.width as f64;
-                    // let win_h = win_size.height as f64;
-
-                    // //get remote screen dimensions
-                    // let sx = ((position.x / win_w as f64) * width as f64)
-                    //     .round()
-                    //     .clamp(0.0, (width - 1) as f64) as u32;
-                    // let sy = ((position.y / win_h as f64) * height as f64)
-                    //     .round()
-                    //     .clamp(0.0, (height - 1) as f64) as u32;
-
-                    // //build packet and send it
-                    // let packet = make_mouse_move_packet(sx, sy);
-                    // let _ = mouse_transmitter.send(packet);
-
                     //gets the DPI scale(how many physical pixels each logical pixel is)
                     let scale = window.scale_factor() as f64;
                     //position.x & y are in logical pixels, * by scale to convert to physical pixels
@@ -282,18 +268,18 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     let _ = mouse_transmitter.send(packet);
                 },
                 WindowEvent::Resized(size) => {
-                    //if size actually changed resize the surface and redraw the window
+                    //if size actually changed resize the surface and the pixels buffer then redraw the window
                     if size.width > 0 && size.height > 0 {
                             pixels.resize_surface(size.width, size.height).unwrap();
                             pixels.resize_buffer(size.width, size.height).unwrap();
                             window.request_redraw();
-                        }                
-                    },
+                    }    
+                },
                 WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                    //if size actually changed resize the surface and redraw the window
+                    //if size actually changed resize the surface and the pixels buffer then redraw the window
                     if new_inner_size.width > 0 && new_inner_size.height > 0 {
                         pixels.resize_surface(new_inner_size.width, new_inner_size.height).unwrap();
-                        pixels.resize_buffer(new_inner_size.width, new_inner_size.height).unwrap();
+                        //pixels.resize_buffer(new_inner_size.width, new_inner_size.height).unwrap();
                         window.request_redraw();
                     }
                 }
@@ -334,6 +320,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
 
         match msg_type {
             MessageType::FrameDelta => {
+                let t0 = Instant::now();
                 //if there is a frame decode it
                 if let Ok(Some(frame)) = decoder.decode(&payload) {
                     //get dimentions and yuv planes
@@ -350,11 +337,13 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
 
                     //convert yuv to rgba with proper strides
                     let rgba = yuv420p_to_rgba_with_stride(y, u, v, w, h, y_stride, u_stride, v_stride);
-
+                    println!("Decode and convert timer: {}ms", t0.elapsed().as_millis());
                     //send the frame to the main thread frame receiver
+                    let t1 = Instant::now();
                     frame_transmitter.send(FrameUpdate::Full { w: w as u32, h: h as u32, bytes: rgba }).ok();
                     //prompt event loop to handle new frame
                     let _ = proxy.send_event(UserEvent::NewUpdate);
+                    println!("Send frame to reciever timer: {}ms", t1.elapsed().as_millis());
                 }
             },
             MessageType::FrameEnd => {

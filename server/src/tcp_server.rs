@@ -124,14 +124,18 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     println!("ScreenCaptureKit capture started…");
 
     //get first image and the images width/height
-    let (width, height, first_rgba) = rx.recv()?;
+    let (init_width, init_height, first_rgba) = rx.recv()?;
     //create an empty vec with dimensions of first image as RGB
-    let mut rgb_buf = vec![0u8; width * height * 3];
+    let mut rgb_buf = vec![0u8; (init_width / 2) * (init_height / 2) * 3];
     //create an empty vec with dimensions of first image downscaled
-    let mut down_rgba = vec![0u8; (width / 2) * (height / 2) * 4];
+    let mut down_rgba = vec![0u8; (init_width / 2) * (init_height / 2) * 4];
+
+    let (width, height) = downscale_rgba_box_2x(&mut down_rgba, &first_rgba, init_width, init_height);
+    // convert the downscaled RGBA to RGB
+    rgba_to_rgb_inplace(&mut rgb_buf[0..width*height*3], &down_rgba[0..width*height*4]);
 
     //create rgb of first image
-    rgba_to_rgb_inplace(&mut rgb_buf, &first_rgba);
+    //rgba_to_rgb_inplace(&mut rgb_buf, &first_rgba);
 
     //set current encoder dimensions
     let mut current_enc_w = width;
@@ -160,47 +164,25 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     let mut prev_frame = first_rgba;
 
     loop {
-        let loop_timer = Instant::now();
         let mut latest = None;
-
-        let timer1 = Instant::now();
         // drain the capture channel and keep only the latest frame
         while let Ok(frame) = rx.try_recv() {
             latest = Some(frame);
         }
 
         if let Some((_, _, rgba)) = latest {
-            let t_encode = Instant::now();
+            // Downscale
+            let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, init_width, init_height);
+            // Convert RGBA → RGB
+            rgba_to_rgb_inplace(
+                &mut rgb_buf[0..nw * nh * 3],
+                &down_rgba[0..nw * nh * 4],
+            );
 
-            let (enc_w, enc_h, rgb_src_slice) = if width > 1920 {
-                //downacale the latest image from screencapture
-                let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, width, height);
-                // convert the downscaled RGBA to RGB
-                rgba_to_rgb_inplace(&mut rgb_buf[0..nw*nh*3], &down_rgba[0..nw*nh*4]);
-                (nw, nh, &rgb_buf[0..nw*nh*3])
-            } else {
-                // convert the full RGBA to RGB
-                rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
-                (width, height, &rgb_buf[..])
-            };
-
-            //if the current encoder isnt the correct size, recreate encoder
-            if current_enc_w != enc_w || current_enc_h != enc_h {
-                println!("Re-creating encoder for new resolution: {}x{}", enc_w, enc_h);
-                let enc_cfg = EncoderConfig::new(enc_w as u32, enc_h as u32)
-                    .max_frame_rate(30.0)
-                    .set_bitrate_bps(10_000_000)
-                    .rate_control_mode(RateControlMode::Bitrate);
-                encoder = Encoder::with_config(enc_cfg)?;
-                current_enc_w = enc_w;
-                current_enc_h = enc_h;
-            }
-            //change rgb image to yuv
-            let yuv = YUVBuffer::with_rgb(enc_w, enc_h, rgb_src_slice);
-            //compress yuv image
+            // Prepare YUV buffer and encode
+            let yuv = YUVBuffer::with_rgb(nw, nh, &rgb_buf[0..nw * nh * 3]);
             let bitstream = encoder.encode(&yuv)?;
-            //turn bitstream into sendable ve<u8>
-            let mut encoded = bitstream.to_vec();
+            let encoded = bitstream.to_vec();
 
             if !encoded.is_empty() {
                 frame_transmitter.send((MessageType::FrameDelta, encoded))?;
