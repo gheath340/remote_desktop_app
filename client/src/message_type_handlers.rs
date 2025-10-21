@@ -27,16 +27,6 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
 }
 
 pub fn handle_frame_full(width: u32, height: u32, payload: &[u8], pixels: &mut pixels::Pixels) -> Result<(), Box<dyn Error>> {
-    // let frame = pixels.frame_mut();
-
-    // if payload.len() != (width as usize) * (height as usize) * 4 {
-    //     return Err("FrameFull pixel data length mismatch".into());
-    // }
-
-    // //add image data to frame to display image
-    // frame.copy_from_slice(payload);
-
-    //THIS CODE REALLY ONLY IS NECESSARY OVER THE COMMENTED OUT CODE IF SOMETHING ELSE IN THE CODE IS BROKEN
     //get the current display area size
     let extent = pixels.texture().size();
 
@@ -50,6 +40,7 @@ pub fn handle_frame_full(width: u32, height: u32, payload: &[u8], pixels: &mut p
     //write directly into pixel buffer
     let frame = pixels.frame_mut();
     frame.copy_from_slice(&scaled);
+
     Ok(())
 }
 

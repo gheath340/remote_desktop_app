@@ -53,23 +53,6 @@ fn make_mouse_move_packet(x: u32, y: u32) -> Vec<u8> {
     packet
 }
 
-fn calculate_viewport(win_w: u32, win_h: u32, frame_w: u32, frame_h: u32,) -> (u32, u32) {
-    let aspect_frame = frame_w as f32 / frame_h as f32;
-    let aspect_window = win_w as f32 / win_h as f32;
-
-    if aspect_window > aspect_frame {
-        // window is wider than frame, pillarbox horizontally
-        let h = win_h;
-        let w = (h as f32 * aspect_frame) as u32;
-        return (w, h);
-    } else {
-        // window is taller than frame, letterbox vertically
-        let w = win_w;
-        let h = (w as f32 / aspect_frame) as u32;
-        return (w, h);
-    };
-}
-
 fn yuv420p_to_rgba_with_stride(
     y: &[u8], u: &[u8], v: &[u8],
     w: usize, h: usize,
@@ -302,12 +285,15 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     //if size actually changed resize the surface and redraw the window
                     if size.width > 0 && size.height > 0 {
                             pixels.resize_surface(size.width, size.height).unwrap();
+                            pixels.resize_buffer(size.width, size.height).unwrap();
                             window.request_redraw();
-                        }                },
+                        }                
+                    },
                 WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
                     //if size actually changed resize the surface and redraw the window
                     if new_inner_size.width > 0 && new_inner_size.height > 0 {
                         pixels.resize_surface(new_inner_size.width, new_inner_size.height).unwrap();
+                        pixels.resize_buffer(new_inner_size.width, new_inner_size.height).unwrap();
                         window.request_redraw();
                     }
                 }
