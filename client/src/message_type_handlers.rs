@@ -54,37 +54,48 @@ pub fn handle_frame_full(width: u32, height: u32, payload: &[u8], pixels: &mut p
 }
 
 pub fn handle_frame_delta(payload: &[u8], pixels: &mut pixels::Pixels) -> Result<(), Box<dyn Error>>  {
+    //if payload is too short error out
     if payload.len() < 16 {
         eprintln!("Frame delta too short");
         return Ok(());
     }
 
+    //first 4 bytes are the number of changed rectangles
     let rect_count = u32::from_be_bytes(payload[0..4].try_into().unwrap()) as usize;
+    //offset to start reading rectangles from correct position
     let mut offset = 4;
 
+    //struct with frame dimensions
     let extent = pixels.texture().size();
+    //mutable reference to pixel buffer
     let frame = pixels.frame_mut();
+    //frame width
     let fw = extent.width as usize;
 
     for _ in 0..rect_count {
+        //if there isn't enough data for the rectangle data error out
         if offset + 16 > payload.len() {
             return Err("Truncated FrameDelta payload".into());
         }
 
+        //read rectangle metadata and update offset
         let x = u32::from_be_bytes(payload[offset..offset+4].try_into().unwrap()) as usize;
         let y = u32::from_be_bytes(payload[offset+4..offset+8].try_into().unwrap()) as usize;
         let w = u32::from_be_bytes(payload[offset+8..offset+12].try_into().unwrap()) as usize;
         let h = u32::from_be_bytes(payload[offset+12..offset+16].try_into().unwrap()) as usize;
         offset += 16;
 
+        //calculate size of rectangle pixel data and ensure enough data is present
         let rect_size = w * h * 4;
         if offset + rect_size > payload.len() {
             return Err("Truncated FrameDelta pixel data".into());
         }
 
+        //get rectangle pixel data and update offset
         let data = &payload[offset..offset+rect_size];
         offset += rect_size;
 
+        //copy rectangle data into correct position in frame buffer
         for row in 0..h {
             let dest_start = ((y + row) * fw + x) * 4;
             let dest_end = dest_start + w * 4;
