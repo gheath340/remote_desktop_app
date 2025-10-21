@@ -23,8 +23,8 @@ use turbojpeg::{ Compressor,
 use common::message_type::MessageType;
 use crate::message_type_handlers;
 use crate::capture::start_sck_stream;
-use openh264::{ 
-    encoder::{ Encoder, EncoderConfig, RateControlMode }, 
+use openh264::{
+    encoder::{ Encoder, EncoderConfig, RateControlMode },
     formats::YUVBuffer,
 };
 
@@ -171,23 +171,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
 
         if let Some((_, _, rgba)) = latest {
             let t_encode = Instant::now();
-            // rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
-            // let (enc_w, enc_h, rgb_src_slice) = if width > 1920 {
-            //     // pre-allocate once outside the loop:
-            //     let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, width, height);
-            //     // pre-alloc once: let mut rgb_buf = vec![0u8; nw*nh*3];
-            //     rgba_to_rgb_inplace(&mut rgb_buf[0..nw*nh*3], &down_rgba[0..nw*nh*4]);
-            //     (nw, nh, &rgb_buf[0..nw*nh*3])
-            // } else {
-            //     // pre-alloc once: let mut rgb_buf = vec![0u8; width*height*3];
-            //     rgba_to_rgb_inplace(&mut rgb_buf, &rgba);
-            //     (width, height, &rgb_buf[..])
-            // };
 
-            // // let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb);
-            // let yuv = YUVBuffer::with_rgb(width as usize, height as usize, &rgb_buf);
-            // // Encode the frame
-            // let bitstream = encoder.encode(&yuv)?;
             let (enc_w, enc_h, rgb_src_slice) = if width > 1920 {
                 //downacale the latest image from screencapture
                 let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, width, height);

@@ -319,16 +319,18 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
 }
 
 fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>, mouse_receiver: mpsc::Receiver<Vec<u8>>) -> Result<(), Box<dyn Error>> {
+    //create h264 decoder and buffer for frame
     let mut decoder = Decoder::new().unwrap();
     let mut h264_buffer: Vec<u8> = Vec::new();
 
     loop {
-        // Handle outgoing mouse packets, etc.
+        //send outgoing mouse packets
         while let Ok(packet) = mouse_receiver.try_recv() {
             tls.write_all(&packet)?;
         }
 
         let mut header = [0u8; 5];
+        //read the message header
         if let Err(e) = tls.read_exact(&mut header) {
             if e.kind() == std::io::ErrorKind::UnexpectedEof {
                 println!("Server disconnected");
@@ -337,33 +339,35 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
             continue;
         }
 
+        //parse the message header into message type and payload length
         let msg_type = MessageType::from_u8(header[0]);
         let payload_len = u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
+        //read the message payload
         let mut payload = vec![0u8; payload_len as usize];
         tls.read_exact(&mut payload)?;
 
         match msg_type {
             MessageType::FrameDelta => {
+                //if there is a frame decode it
                 if let Ok(Some(frame)) = decoder.decode(&payload) {
+                    //get dimentions and yuv planes
                     let w = frame.width() as usize;
                     let h = frame.height() as usize;
-
                     let y = frame.y();
                     let u = frame.u();
                     let v = frame.v();
 
-                    // --- NEW STRIDE FIX ---
+                    //get the strides for each plane
                     let y_stride = y.len() / h;
                     let u_stride = u.len() / ((h + 1) / 2);
                     let v_stride = v.len() / ((h + 1) / 2);
 
-                    let rgba = yuv420p_to_rgba_with_stride(
-                        y, u, v, w, h,
-                        y_stride, u_stride, v_stride
-                    );
-                    frame_transmitter
-                        .send(FrameUpdate::Full { w: w as u32, h: h as u32, bytes: rgba })
-                        .ok();
+                    //convert yuv to rgba with proper strides
+                    let rgba = yuv420p_to_rgba_with_stride(y, u, v, w, h, y_stride, u_stride, v_stride);
+
+                    //send the frame to the main thread frame receiver
+                    frame_transmitter.send(FrameUpdate::Full { w: w as u32, h: h as u32, bytes: rgba }).ok();
+                    //prompt event loop to handle new frame
                     let _ = proxy.send_event(UserEvent::NewUpdate);
                 }
             },
@@ -371,39 +375,37 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
                 if h264_buffer.is_empty() {
                     continue;
                 }
-
+                //if anything is left in the buffer try to decode it
                 match decoder.decode(&h264_buffer) {
                     Ok(Some(frame)) => {
+                        //get dimentions and yuv planes
                         let w = frame.width() as usize;
                         let h = frame.height() as usize;
-
                         let y = frame.y();
                         let u = frame.u();
                         let v = frame.v();
 
-                        // --- NEW STRIDE FIX ---
+                        //get the strides for each plane
                         let y_stride = y.len() / h;
                         let u_stride = u.len() / ((h + 1) / 2);
                         let v_stride = v.len() / ((h + 1) / 2);
 
-                        let rgba = yuv420p_to_rgba_with_stride(
-                            y, u, v, w, h,
-                            y_stride, u_stride, v_stride
-                        );
-                        frame_transmitter.send(FrameUpdate::Full {
-                            w: w as u32,
-                            h: h as u32,
-                            bytes: rgba,
-                        }).ok();
+                        //convert yuv to rgba with proper strides
+                        let rgba = yuv420p_to_rgba_with_stride(y, u, v, w, h, y_stride, u_stride, v_stride);
+
+                        //send the frame to the main thread frame receiver
+                        frame_transmitter.send(FrameUpdate::Full { w: w as u32, h: h as u32, bytes: rgba }).ok();
+                        //prompt event loop to handle new frame
                         let _ = proxy.send_event(UserEvent::NewUpdate);
                     }
+                    //if no complete frame yet just wait for more data
                     Ok(None) => println!("Decoder waiting for complete frame"),
                     Err(e) => {
                         eprintln!("Decode error: {:?}", e);
                         decoder = Decoder::new().unwrap();
                     }
                 }
-
+                //clear the h264 buffer for the next frame
                 h264_buffer.clear();
             },
             MessageType::FrameFull => {},
