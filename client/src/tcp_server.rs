@@ -96,7 +96,7 @@ fn yuv420p_to_rgba_with_stride(
 //to run on desktop comment out other _address vars and change connection_address to home_desktop_address.clone()
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     let home_desktop_address = "192.168.50.105:7878".to_string();
-    //let vm_home_address = "192.168.50.209:7878".to_string();
+    let vm_home_address = "192.168.50.209:7878".to_string();
     let vm_work_address = "10.176.7.73:7878".to_string();
     //allow for server address override by calling "SERVER_ADDR=<address> cargo run -p client"
     let connection_address = env::var("SERVER_ADDR").unwrap_or(home_desktop_address.clone());
@@ -273,7 +273,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                             pixels.resize_surface(size.width, size.height).unwrap();
                             pixels.resize_buffer(size.width, size.height).unwrap();
                             window.request_redraw();
-                    }    
+                    }
                 },
                 WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
                     //if size actually changed resize the surface and the pixels buffer then redraw the window
@@ -314,13 +314,13 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
         //parse the message header into message type and payload length
         let msg_type = MessageType::from_u8(header[0]);
         let payload_len = u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
+        let t0 = Instant::now();
         //read the message payload
         let mut payload = vec![0u8; payload_len as usize];
         tls.read_exact(&mut payload)?;
 
         match msg_type {
             MessageType::FrameDelta => {
-                let t0 = Instant::now();
                 //if there is a frame decode it
                 if let Ok(Some(frame)) = decoder.decode(&payload) {
                     //get dimentions and yuv planes
@@ -337,13 +337,11 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
 
                     //convert yuv to rgba with proper strides
                     let rgba = yuv420p_to_rgba_with_stride(y, u, v, w, h, y_stride, u_stride, v_stride);
-                    println!("Decode and convert timer: {}ms", t0.elapsed().as_millis());
                     //send the frame to the main thread frame receiver
-                    let t1 = Instant::now();
                     frame_transmitter.send(FrameUpdate::Full { w: w as u32, h: h as u32, bytes: rgba }).ok();
                     //prompt event loop to handle new frame
                     let _ = proxy.send_event(UserEvent::NewUpdate);
-                    println!("Send frame to reciever timer: {}ms", t1.elapsed().as_millis());
+                    println!("From payload read to trasmitted timer: {}ms", t0.elapsed().as_millis());
                 }
             },
             MessageType::FrameEnd => {
