@@ -24,7 +24,6 @@ use crate::{ message_type_handlers, };
 use lz4_flex::decompress_size_prepended;
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
-use chrono::Utc;
 
 
  #[derive(Debug)]
@@ -192,29 +191,19 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             //handle UserEven::NewUpdates
             Event::UserEvent(UserEvent::NewUpdate) => {
                 //check reciever for updates and send to the correct FrameUpdate
-                let mut got_any = false;
-                let t0 = Instant::now();
+                let mut latest: Option<(u32, u32, Vec<u8>)> = None;
+
                 while let Ok(update) = frame_receiver.try_recv() {
-                    println!("Frame recieve timer: {}ms", t0.elapsed().as_millis());
-                    match update {
-                        //call handle_frame_full when FrameUpdate::Full
-                        FrameUpdate::Full{w, h, bytes} => {
-                            if let Err(e) = message_type_handlers::handle_frame_full(w, h, &bytes, &mut pixels) {
-                                eprintln!("Frame full error: {e}");
-                            }
-                            got_any = true;
-                        }
-                        //call handle_frame_delta when FrameUpdate::Delta
-                        FrameUpdate::Delta(bytes) => {
-                            if let Err(e) = message_type_handlers::handle_frame_delta(&bytes, &mut pixels) {
-                                eprintln!("Frame delta error: {e}");
-                            }
-                            got_any = true;
-                        }
+                    if let FrameUpdate::Full { w, h, bytes } = update {
+                        latest = Some((w, h, bytes)); // overwrite old -> coalesce
                     }
                 }
-                //if got_any UserEvent::NewUpdate call for window redraw to apply changes
-                if got_any {
+
+                if let Some((w, h, bytes)) = latest {
+                    // update one frame, once
+                    if let Err(e) = message_type_handlers::handle_frame_full(w, h, &bytes, &mut pixels) {
+                        eprintln!("Frame full error: {e}");
+                    }
                     window.request_redraw();
                 }
             },
@@ -225,9 +214,11 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             //window.request_redraw() calls this to redraw window
             Event::RedrawRequested(_) => {
                 //draw the scaled frame
+                let t0 = Instant::now();
                 if let Err(e) = pixels.render() {
                     eprintln!("Render error: {e}");
                 }
+                println!("Render time: {}ms", t0.elapsed().as_millis());
 
                 frame_count += 1;
                 if last_frame.elapsed() >= Duration::from_secs(1) {
@@ -315,12 +306,10 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
         //parse the message header into message type and payload length
         let msg_type = MessageType::from_u8(header[0]);
         let payload_len = u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
-        let t0 = Instant::now();
         //read the message payload
         let mut payload = vec![0u8; payload_len as usize];
         tls.read_exact(&mut payload)?;
-        let now = Utc::now();
-        println!("Server sent at: {}", now.to_rfc3339());
+
 
         match msg_type {
             MessageType::FrameDelta => {
@@ -344,7 +333,6 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
                     frame_transmitter.send(FrameUpdate::Full { w: w as u32, h: h as u32, bytes: rgba }).ok();
                     //prompt event loop to handle new frame
                     let _ = proxy.send_event(UserEvent::NewUpdate);
-                    println!("From payload read to trasmitted timer: {}ms", t0.elapsed().as_millis());
                 }
             },
             MessageType::FrameEnd => {

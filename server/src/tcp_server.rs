@@ -27,7 +27,6 @@ use openh264::{
     encoder::{ Encoder, EncoderConfig, RateControlMode },
     formats::YUVBuffer,
 };
-use chrono::Utc;
 
 
 #[inline]
@@ -288,7 +287,6 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
             }
             Err(e) => return Err(Box::new(e)),
         }
-        //std::thread::sleep(Duration::from_micros(500));
     }
 }
 
@@ -322,7 +320,5 @@ pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &
     //send the message to client
     write_all_retry(&buf)?;
     let _ = stream.flush();
-    let now = Utc::now();
-    println!("Server sent at: {}", now.to_rfc3339());
     Ok(())
 }

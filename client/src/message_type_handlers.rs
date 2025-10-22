@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::time::Instant;
 use image::{ImageBuffer, Rgba, imageops::resize, imageops::FilterType};
 
 
@@ -28,6 +29,7 @@ pub fn handle_error(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
 
 pub fn handle_frame_full(width: u32, height: u32, payload: &[u8], pixels: &mut pixels::Pixels) -> Result<(), Box<dyn Error>> {
     //get the current display area size
+    let t0 = Instant::now();
     let extent = pixels.texture().size();
 
     //build ImageBuffer from the raw RGBA bytes
@@ -40,7 +42,7 @@ pub fn handle_frame_full(width: u32, height: u32, payload: &[u8], pixels: &mut p
     //write directly into pixel buffer
     let frame = pixels.frame_mut();
     frame.copy_from_slice(&scaled);
-
+    println!("Frame handler timer: {}ms", t0.elapsed().as_millis());
     Ok(())
 }
 
