@@ -27,6 +27,7 @@ use openh264::{
     encoder::{ Encoder, EncoderConfig, RateControlMode },
     formats::YUVBuffer,
 };
+use chrono::Utc;
 
 
 #[inline]
@@ -183,7 +184,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             let yuv = YUVBuffer::with_rgb(nw, nh, &rgb_buf[0..nw * nh * 3]);
             let bitstream = encoder.encode(&yuv)?;
             let encoded = bitstream.to_vec();
-
             if !encoded.is_empty() {
                 frame_transmitter.send((MessageType::FrameDelta, encoded))?;
                 frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
@@ -322,5 +322,7 @@ pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &
     //send the message to client
     write_all_retry(&buf)?;
     let _ = stream.flush();
+    let now = Utc::now();
+    println!("Server sent at: {}", now.to_rfc3339());
     Ok(())
 }

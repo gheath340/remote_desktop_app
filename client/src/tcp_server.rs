@@ -24,6 +24,7 @@ use crate::{ message_type_handlers, };
 use lz4_flex::decompress_size_prepended;
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
+use chrono::Utc;
 
 
  #[derive(Debug)]
@@ -318,6 +319,8 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<Fram
         //read the message payload
         let mut payload = vec![0u8; payload_len as usize];
         tls.read_exact(&mut payload)?;
+        let now = Utc::now();
+        println!("Server sent at: {}", now.to_rfc3339());
 
         match msg_type {
             MessageType::FrameDelta => {
