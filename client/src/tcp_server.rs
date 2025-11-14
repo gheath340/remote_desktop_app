@@ -97,9 +97,9 @@ fn yuv420p_to_rgba_with_stride(
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     let home_desktop_address = "192.168.50.105:7878".to_string();
     let vm_home_address = "192.168.50.209:7878".to_string();
-    let vm_work_address = "10.176.7.73:7878".to_string();
+    let vm_work_address = "10.176.3.96:7878".to_string();
     //allow for server address override by calling "SERVER_ADDR=<address> cargo run -p client"
-    let connection_address = env::var("SERVER_ADDR").unwrap_or(home_desktop_address.clone());
+    let connection_address = env::var("SERVER_ADDR").unwrap_or(vm_work_address.clone());
     println!("Connecting to server at {}", connection_address);
 
     //create the UI, main thread loop
