@@ -98,7 +98,7 @@ void sck_start_capture(sck_frame_cb cb) {
                     config.showsCursor = YES;
                     config.width  = display.width;
                     config.height = display.height;
-                    config.minimumFrameInterval = CMTimeMake(1, 60);
+                    config.minimumFrameInterval = CMTimeMake(1, 30);
                     config.scalesToFit = YES;
 
                     // Initialize global stream & bridge
