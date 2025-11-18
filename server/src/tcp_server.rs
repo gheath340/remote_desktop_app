@@ -216,7 +216,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             &mut rgb_buf[0..nw * nh * 3],
             &down_rgba[0..nw * nh * 4],
         );
-
         let yuv = YUVBuffer::with_rgb(nw, nh, &rgb_buf[0..nw * nh * 3]);
         let bitstream = encoder.encode(&yuv)?;
         let encoded = bitstream.to_vec();
@@ -224,6 +223,8 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             frame_transmitter.send((MessageType::FrameDelta, encoded))?;
             frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
         }
+        println!("Encode and send frame: {}ms", t4.elapsed().as_millis());
+        println!("Loop timer: {}ms", t1.elapsed().as_millis());
     }
 }
 
