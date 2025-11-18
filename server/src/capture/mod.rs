@@ -3,7 +3,12 @@ mod mac;
 #[cfg(target_os = "macos")]
 pub use mac::start_sck_stream;
 
+// #[cfg(target_os = "linux")]
+// mod linux;
+// #[cfg(target_os = "linux")]
+// pub use linux::start_sck_stream;
+
 #[cfg(target_os = "linux")]
-mod linux;
+mod linux_capture;
 #[cfg(target_os = "linux")]
-pub use linux::start_sck_stream;
+pub use linux_capture::start_sck_stream;

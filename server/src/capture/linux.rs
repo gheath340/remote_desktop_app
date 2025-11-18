@@ -1,6 +1,7 @@
 use std::sync::mpsc::{channel, Receiver};
 use std::time::Duration;
 use xcap::Monitor;
+use std::time::Instant;
 
 pub fn start_sck_stream() -> Receiver<(usize, usize, Vec<u8>)> {
     let (tx, rx) = channel();
@@ -11,6 +12,7 @@ pub fn start_sck_stream() -> Receiver<(usize, usize, Vec<u8>)> {
         let monitor = monitors.first().expect("No monitors found");
 
         loop {
+            let t0 = Instant::now();
             match monitor.capture_image() {
                 Ok(img) => {
                     let width = img.width() as usize;
@@ -26,6 +28,7 @@ pub fn start_sck_stream() -> Receiver<(usize, usize, Vec<u8>)> {
                     std::thread::sleep(Duration::from_millis(16));
                 }
             }
+            println!("SCK stream loop: {}ms", t0.elapsed().as_millis());
         }
     });
 

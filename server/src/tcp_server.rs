@@ -163,39 +163,68 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     //initialize prev_frame with the first frame
     let mut prev_frame = first_rgba;
 
-    let t0 = Instant::now();
+    // let t0 = Instant::now();
+    // loop {
+    //     let t1 = Instant::now();
+    //     // Block until next frame arrives
+    //     let t5 = Instant::now();
+    //     let (_, _, rgba) = rx.recv()?;  
+    //     println!("Received frame: {}ms", t5.elapsed().as_millis());
+
+    //     let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, init_width, init_height);
+
+    //     rgba_to_rgb_inplace(
+    //         &mut rgb_buf[0..nw * nh * 3],
+    //         &down_rgba[0..nw * nh * 4],
+    //     );
+
+    //     let yuv = YUVBuffer::with_rgb(nw, nh, &rgb_buf[0..nw * nh * 3]);
+    //     let bitstream = encoder.encode(&yuv)?;
+    //     let encoded = bitstream.to_vec();
+    //     if !encoded.is_empty() {
+    //         frame_transmitter.send((MessageType::FrameDelta, encoded))?;
+    //         frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
+    //     }
+    // }
+
+    let mut last_sent = Instant::now();
+    let target_frame_time = Duration::from_millis(33); // ~30 fps
+
     loop {
-        let mut latest = None;
-        // drain the capture channel and keep only the latest frame
-        let t1 = Instant::now();
+        // 1) Block until at least one frame arrives
+        let mut latest = rx.recv()?; // (w, h, rgba)
+
+        // 2) Drain any extra frames that arrived while we were busy
         while let Ok(frame) = rx.try_recv() {
-            latest = Some(frame);
-            println!("Recieved frame: {}ms", t1.elapsed().as_millis());
+            latest = frame; // always keep only the newest
         }
 
-        if let Some((_, _, rgba)) = latest {
-            // Downscale
-            let t2 = Instant::now();
-            let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, init_width, init_height);
-            println!("Downscaled frame: {}ms", t2.elapsed().as_millis());
-            // Convert RGBA → RGB
-            let t3 = Instant::now();
-            rgba_to_rgb_inplace(&mut rgb_buf[0..nw * nh * 3],&down_rgba[0..nw * nh * 4],);
-            println!("RGBA -> RGB frame: {}ms", t3.elapsed().as_millis());
+        // Optional: soft cap at 30fps (skip if we're too fast)
+        let elapsed = last_sent.elapsed();
+        if elapsed < target_frame_time {
+            // If you want *strict* 30fps, you can sleep here:
+            std::thread::sleep(target_frame_time - elapsed);
+            continue;
+        }
 
-            // Prepare YUV buffer and encode
-            let t4 = Instant::now();
-            let yuv = YUVBuffer::with_rgb(nw, nh, &rgb_buf[0..nw * nh * 3]);
-            let bitstream = encoder.encode(&yuv)?;
-            let encoded = bitstream.to_vec();
-            if !encoded.is_empty() {
-                frame_transmitter.send((MessageType::FrameDelta, encoded))?;
-                frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
-            }
-            println!("Encode and send frame: {}ms", t4.elapsed().as_millis());
+        let (_, _, rgba) = latest;
+        // println!("Received coalesced frame at {:?}", last_sent); // debugging
+
+        let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, init_width, init_height);
+
+        rgba_to_rgb_inplace(
+            &mut rgb_buf[0..nw * nh * 3],
+            &down_rgba[0..nw * nh * 4],
+        );
+
+        let yuv = YUVBuffer::with_rgb(nw, nh, &rgb_buf[0..nw * nh * 3]);
+        let bitstream = encoder.encode(&yuv)?;
+        let encoded = bitstream.to_vec();
+        if !encoded.is_empty() {
+            frame_transmitter.send((MessageType::FrameDelta, encoded))?;
+            frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
         }
     }
-    println!("Loop timer: {}ms", t0.elapsed().as_millis());
 }
 
 //to run on local host SERVER_BIND=127.0.0.1:7878 cargo run --release -p server
