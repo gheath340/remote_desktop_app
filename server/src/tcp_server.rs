@@ -170,8 +170,8 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
         let t1 = Instant::now();
         while let Ok(frame) = rx.try_recv() {
             latest = Some(frame);
+            println!("Recieved frame: {}ms", t1.elapsed().as_millis());
         }
-        println!("Recieved frame: {}ms", t1.elapsed().as_millis());
 
         if let Some((_, _, rgba)) = latest {
             // Downscale
