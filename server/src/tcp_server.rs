@@ -163,23 +163,28 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     //initialize prev_frame with the first frame
     let mut prev_frame = first_rgba;
 
+    let t0 = Instant::now();
     loop {
         let mut latest = None;
         // drain the capture channel and keep only the latest frame
+        let t1 = Instant::now();
         while let Ok(frame) = rx.try_recv() {
             latest = Some(frame);
         }
+        println!("Recieved frame: {}ms", t1.elapsed().as_millis());
 
         if let Some((_, _, rgba)) = latest {
             // Downscale
+            let t2 = Instant::now();
             let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, init_width, init_height);
+            println!("Downscaled frame: {}ms", t2.elapsed().as_millis());
             // Convert RGBA → RGB
-            rgba_to_rgb_inplace(
-                &mut rgb_buf[0..nw * nh * 3],
-                &down_rgba[0..nw * nh * 4],
-            );
+            let t3 = Instant::now();
+            rgba_to_rgb_inplace(&mut rgb_buf[0..nw * nh * 3],&down_rgba[0..nw * nh * 4],);
+            println!("RGBA -> RGB frame: {}ms", t3.elapsed().as_millis());
 
             // Prepare YUV buffer and encode
+            let t4 = Instant::now();
             let yuv = YUVBuffer::with_rgb(nw, nh, &rgb_buf[0..nw * nh * 3]);
             let bitstream = encoder.encode(&yuv)?;
             let encoded = bitstream.to_vec();
@@ -187,8 +192,10 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
                 frame_transmitter.send((MessageType::FrameDelta, encoded))?;
                 frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
             }
+            println!("Encode and send frame: {}ms", t4.elapsed().as_millis());
         }
     }
+    println!("Loop timer: {}ms", t0.elapsed().as_millis());
 }
 
 //to run on local host SERVER_BIND=127.0.0.1:7878 cargo run --release -p server
