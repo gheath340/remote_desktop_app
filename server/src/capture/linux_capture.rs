@@ -142,6 +142,9 @@ fn pipewire_capture_loop(
                             rgba.push(b);
                             rgba.push(a);
                         }
+                        if let Err(e) = tx.send((width.try_into().unwrap(), height.try_into().unwrap(), rgba)) {
+                            eprintln!("[linux_capture] tx.send failed: {e}");
+                        }
                     }
                 }
             }

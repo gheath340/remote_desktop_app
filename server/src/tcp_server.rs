@@ -242,34 +242,6 @@ pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-// pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
-//     let rx = start_sck_stream();
-//     println!("[debug] capture started, measuring FPS…");
-
-//     loop {
-//         let window = Duration::from_secs(1);
-//         let start = Instant::now();
-//         let mut frames = 0usize;
-
-//         while start.elapsed() < window {
-//             match rx.recv_timeout(Duration::from_millis(50)) {
-//                 Ok((_w, _h, _buf)) => {
-//                     frames += 1;
-//                 }
-//                 Err(RecvTimeoutError::Timeout) => {
-//                     // no frame in the last 50ms – just keep going
-//                 }
-//                 Err(RecvTimeoutError::Disconnected) => {
-//                     println!("[debug] capture channel closed");
-//                     return Ok(());
-//                 }
-//             }
-//         }
-
-//         println!("[debug] approx FPS this second: {frames}");
-//     }
-// }
-
 fn handle_incoming_message(msg_type: MessageType, payload: &[u8]) -> Result<(), Box<dyn Error>> {
     match msg_type {
         MessageType::Text => message_type_handlers::handle_text(payload)?,
