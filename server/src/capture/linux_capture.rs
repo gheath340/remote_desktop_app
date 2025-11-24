@@ -16,7 +16,6 @@ use pipewire::{
     spa::pod::Pod,
 };
 use std::os::fd::{OwnedFd, FromRawFd};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 pub fn start_sck_stream() -> Receiver<(usize, usize, Vec<u8>)> {
     let (tx, rx) = mpsc::channel::<(usize, usize, Vec<u8>)>();
@@ -142,16 +141,6 @@ fn pipewire_capture_loop(
                             rgba.push(g);
                             rgba.push(b);
                             rgba.push(a);
-                        }
-
-                        static CAPTURE_COUNT: AtomicU64 = AtomicU64::new(0);
-                        let n = CAPTURE_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-                        if n % 60 == 0 {
-                            println!("[linux_capture] delivered {} frames", n);
-                        }
-
-                        if let Err(e) = tx.send((width as usize, height as usize, rgba)) {
-                            eprintln!("[linux_capture] tx.send failed: {e}");
                         }
                     }
                 }
