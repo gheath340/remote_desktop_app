@@ -74,35 +74,35 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     loop {
         match tls_conn.complete_io(&mut tcp) {
             Ok((_rd, _wr)) => {
-                // Handshake complete when both conditions true:
+                //handshake complete when both conditions true:
                 if !tls_conn.is_handshaking() {
                     break;
                 }
             }
 
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                // Socket not ready yet — wait a bit and try again
+                //socket not ready yet — wait a bit and try again
                 std::thread::sleep(Duration::from_millis(5));
                 continue;
             }
 
             Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {
-                // Interrupted by signal, just retry
+                //interrupted, just retry
                 continue;
             }
 
             Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                // Client disconnected before handshake finished
+                //client disconnected before handshake finished
                 return Err("Client disconnected during TLS handshake".into());
             }
 
             Err(e) => {
-                // Any other error is fatal
+                //any other error is fatal
                 return Err(Box::new(e));
             }
         }
 
-        // Optional: back off a bit if handshake is still progressing
+        //wait if handshake is still progressing
         std::thread::sleep(Duration::from_millis(1));
     }
     let tls = StreamOwned::new(tls_conn, tcp);
@@ -135,9 +135,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     // convert the downscaled RGBA to RGB
     rgba_to_rgb_inplace(&mut rgb_buf[0..width*height*3], &down_rgba[0..width*height*4]);
 
-    //create rgb of first image
-    //rgba_to_rgb_inplace(&mut rgb_buf, &first_rgba);
-
     //set current encoder dimensions
     let mut current_enc_w = width;
     let mut current_enc_h = height;
@@ -164,53 +161,26 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     //initialize prev_frame with the first frame
     let mut prev_frame = first_rgba;
 
-    // let t0 = Instant::now();
-    // loop {
-    //     let t1 = Instant::now();
-    //     // Block until next frame arrives
-    //     let t5 = Instant::now();
-    //     let (_, _, rgba) = rx.recv()?;  
-    //     println!("Received frame: {}ms", t5.elapsed().as_millis());
-
-    //     let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, init_width, init_height);
-
-    //     rgba_to_rgb_inplace(
-    //         &mut rgb_buf[0..nw * nh * 3],
-    //         &down_rgba[0..nw * nh * 4],
-    //     );
-
-    //     let yuv = YUVBuffer::with_rgb(nw, nh, &rgb_buf[0..nw * nh * 3]);
-    //     let bitstream = encoder.encode(&yuv)?;
-    //     let encoded = bitstream.to_vec();
-    //     if !encoded.is_empty() {
-    //         frame_transmitter.send((MessageType::FrameDelta, encoded))?;
-    //         frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
-    //     }
-    // }
-
     let mut last_sent = Instant::now();
     let target_frame_time = Duration::from_millis(33); // ~30 fps
 
     loop {
-        // 1) Block until at least one frame arrives
-        let mut latest = rx.recv()?; // (w, h, rgba)
+        //block until at least one frame arrives
+        let mut latest = rx.recv()?;
 
-        // 2) Drain any extra frames that arrived while we were busy
+        //drain any extra frames that arrived while we were busy
         while let Ok(frame) = rx.try_recv() {
-            latest = frame; // always keep only the newest
+            latest = frame;
         }
 
-        // Optional: soft cap at 30fps (skip if we're too fast)
+        //soft cap at 30fps
         let elapsed = last_sent.elapsed();
         if elapsed < target_frame_time {
-            // If you want *strict* 30fps, you can sleep here:
             std::thread::sleep(target_frame_time - elapsed);
             continue;
         }
 
         let (_, _, rgba) = latest;
-        // println!("Received coalesced frame at {:?}", last_sent); // debugging
-
         let (nw, nh) = downscale_rgba_box_2x(&mut down_rgba, &rgba, init_width, init_height);
 
         rgba_to_rgb_inplace(
@@ -286,23 +256,23 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
             sent_any = true;
         }
 
-        // If we sent frames, go right back to loop to drain quickly
+        //if sent frames, go right back to loop to drain quickly
         if sent_any {
             continue;
         }
 
-        //Try to read, but don't block forever
+        //try to read, but don't block forever
         match tls.read(&mut header) {
             Ok(0) => {
                 println!("Client disconnected");
                 return Ok(());
             }
             Ok(n) if n < 5 => {
-                // partial read; read the rest next loop iteration
+                //partial read; read the rest next loop iteration
                 continue;
             }
             Ok(_) => {
-                // read payload and send to match to get handled properly
+                //read payload and send to match to get handled properly
                 let msg_type = MessageType::from_u8(header[0]);
                 let payload_len =
                     u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
@@ -311,7 +281,7 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
                 handle_incoming_message(msg_type, &payload)?;
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                // no incoming data yet, continue loop
+                //no incoming data yet, continue loop
                 std::thread::sleep(Duration::from_millis(1));
                 continue;
             }
