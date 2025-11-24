@@ -224,53 +224,51 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             frame_transmitter.send((MessageType::FrameDelta, encoded))?;
             frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
         }
-        println!("Encode and send frame: {}ms", t4.elapsed().as_millis());
-        println!("Loop timer: {}ms", t1.elapsed().as_millis());
     }
 }
 
 //to run on local host SERVER_BIND=127.0.0.1:7878 cargo run --release -p server
 //to run at on vm at work or at home cargo run --release -p server
-// pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
-//     let default_addr = "0.0.0.0:7878".to_string();
-//     //allow override of bind address with env var
-//     let bind_addr = env::var("SERVER_BIND").unwrap_or(default_addr);
-//     let listener = TcpListener::bind(&bind_addr)?;
-//     println!("Tcp server listening to {bind_addr}");
-//     //call handel_client on all clients that contact tcp adress
-//     for stream in listener.incoming() {
-//         handle_client(stream?, tls_config.clone())?;
-//     }
-//     Ok(())
-// }
-
 pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
-    let rx = start_sck_stream();
-    println!("[debug] capture started, measuring FPS…");
-
-    loop {
-        let window = Duration::from_secs(1);
-        let start = Instant::now();
-        let mut frames = 0usize;
-
-        while start.elapsed() < window {
-            match rx.recv_timeout(Duration::from_millis(50)) {
-                Ok((_w, _h, _buf)) => {
-                    frames += 1;
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    // no frame in the last 50ms – just keep going
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    println!("[debug] capture channel closed");
-                    return Ok(());
-                }
-            }
-        }
-
-        println!("[debug] approx FPS this second: {frames}");
+    let default_addr = "0.0.0.0:7878".to_string();
+    //allow override of bind address with env var
+    let bind_addr = env::var("SERVER_BIND").unwrap_or(default_addr);
+    let listener = TcpListener::bind(&bind_addr)?;
+    println!("Tcp server listening to {bind_addr}");
+    //call handel_client on all clients that contact tcp adress
+    for stream in listener.incoming() {
+        handle_client(stream?, tls_config.clone())?;
     }
+    Ok(())
 }
+
+// pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
+//     let rx = start_sck_stream();
+//     println!("[debug] capture started, measuring FPS…");
+
+//     loop {
+//         let window = Duration::from_secs(1);
+//         let start = Instant::now();
+//         let mut frames = 0usize;
+
+//         while start.elapsed() < window {
+//             match rx.recv_timeout(Duration::from_millis(50)) {
+//                 Ok((_w, _h, _buf)) => {
+//                     frames += 1;
+//                 }
+//                 Err(RecvTimeoutError::Timeout) => {
+//                     // no frame in the last 50ms – just keep going
+//                 }
+//                 Err(RecvTimeoutError::Disconnected) => {
+//                     println!("[debug] capture channel closed");
+//                     return Ok(());
+//                 }
+//             }
+//         }
+
+//         println!("[debug] approx FPS this second: {frames}");
+//     }
+// }
 
 fn handle_incoming_message(msg_type: MessageType, payload: &[u8]) -> Result<(), Box<dyn Error>> {
     match msg_type {
