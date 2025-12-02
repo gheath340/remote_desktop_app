@@ -110,12 +110,71 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     println!("New client connection");
 
     let (frame_transmitter, frame_receiver) = std::sync::mpsc::channel::<(MessageType, Vec<u8>)>();
+    let (incoming_tx, incoming_rx) = std::sync::mpsc::channel::<(MessageType, Vec<u8>)>();
+
+    //handle incoming messages thread with coalescing mouse movements
+    std::thread::spawn(move || {
+        let mut pending_mouse: Option<(u32,u32)> = None;
+        loop {
+            // Block until at least one message arrives
+            let msg = match incoming_rx.recv() {
+                Ok(m) => m,
+                Err(_) => break, // channel closed -> exit thread
+            };
+
+            match msg.0 {
+                MessageType::MouseMove => {
+                    // parse mouse
+                    if msg.1.len() >= 8 {
+                        let x = u32::from_be_bytes(msg.1[0..4].try_into().unwrap());
+                        let y = u32::from_be_bytes(msg.1[4..8].try_into().unwrap());
+                        pending_mouse = Some((x, y));
+                    }
+
+                    // Drain any immediate extra mouse-move messages to coalesce
+                    while let Ok((mt, pl)) = incoming_rx.try_recv() {
+                        if let MessageType::MouseMove = mt {
+                            if pl.len() >= 8 {
+                                let nx = u32::from_be_bytes(pl[0..4].try_into().unwrap());
+                                let ny = u32::from_be_bytes(pl[4..8].try_into().unwrap());
+                                pending_mouse = Some((nx, ny));
+                            }
+                            continue;
+                        } else {
+                            // handle non-mouse messages that arrived while coalescing
+                            if let Err(e) = handle_incoming_message(mt, &pl) {
+                                eprintln!("handler thread failed to handle message: {:?}", e);
+                            }
+                        }
+                    }
+
+                    // flush the last mouse position (if any)
+                    if let Some((sx, sy)) = pending_mouse.take() {
+                        // Recreate the payload and call the specific mouse handler or reuse general handler
+                        let mut buf = Vec::with_capacity(8);
+                        buf.extend_from_slice(&sx.to_be_bytes());
+                        buf.extend_from_slice(&sy.to_be_bytes());
+                        if let Err(e) = message_type_handlers::handle_mouse_move(&buf) {
+                            eprintln!("mouse move injection failed: {:?}", e);
+                        }
+                    }
+                }
+
+                // Non-mouse messages -> handle immediately
+                _ => {
+                    if let Err(e) = handle_incoming_message(msg.0, &msg.1) {
+                        eprintln!("handler thread failed to handle message: {:?}", e);
+                    }
+                }
+            }
+        }
+    });
 
     //new dispatcher thread
     std::thread::spawn(move || {
     // this thread owns the TLS stream
     let mut tls = tls;
-    if let Err(e) = dispatcher(&mut tls, frame_receiver) {
+    if let Err(e) = dispatcher(&mut tls, frame_receiver, incoming_tx) {
         eprintln!("Dispatcher thread error: {e}");
     }
     });
@@ -244,7 +303,7 @@ fn handle_incoming_message(msg_type: MessageType, payload: &[u8]) -> Result<(), 
     Ok(())
 }
 
-fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(MessageType, Vec<u8>)>) -> Result<(), Box<dyn Error>> {
+fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(MessageType, Vec<u8>)>, incoming_tx: mpsc::Sender<(MessageType, Vec<u8>)>) -> Result<(), Box<dyn Error>> {
 
     let mut header = [0u8; 5];
 
@@ -278,7 +337,9 @@ fn dispatcher<T: Read + Write>(tls: &mut T, frame_receiver: mpsc::Receiver<(Mess
                     u32::from_be_bytes([header[1], header[2], header[3], header[4]]);
                 let mut payload = vec![0u8; payload_len as usize];
                 tls.read_exact(&mut payload)?;
-                handle_incoming_message(msg_type, &payload)?;
+                if let Err(e) = incoming_tx.send((msg_type, payload)) {
+                    eprintln!("Failed to queue incoming message: {:?}", e);
+                }
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                 //no incoming data yet, continue loop

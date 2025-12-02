@@ -214,12 +214,9 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
             //window.request_redraw() calls this to redraw window
             Event::RedrawRequested(_) => {
                 //draw the scaled frame
-                let t0 = Instant::now();
                 if let Err(e) = pixels.render() {
                     eprintln!("Render error: {e}");
                 }
-                println!("Render time: {}ms", t0.elapsed().as_millis());
-
                 frame_count += 1;
                 if last_frame.elapsed() >= Duration::from_secs(1) {
                     println!("FPS: {}", frame_count);
