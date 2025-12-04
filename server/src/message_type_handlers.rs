@@ -220,13 +220,44 @@ pub fn handle_resize(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
 }
 
 pub fn handle_key_down(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
-    println!("Key down: {:?}", payload);
+   if payload.len() < 10 {
+        return Err("KeyDown payload too short".into());
+    }
+
+    let scancode = u32::from_be_bytes(payload[0..4].try_into()?);
+    let modifiers = u32::from_be_bytes(payload[4..8].try_into()?);
+
+    // vk_name optional
+    let vk_name_len = u16::from_be_bytes(payload[8..10].try_into()?);
+    let vk_name = if vk_name_len > 0 && payload.len() >= 10 + vk_name_len as usize {
+        Some(std::str::from_utf8(&payload[10..10 + vk_name_len as usize])?)
+    } else {
+        None
+    };
+
+    // ydotool key press: send scancode
+    Command::new("ydotool")
+        .arg("key")
+        .arg(scancode.to_string())
+        .status()?;
 
     Ok(())
 }
 
 pub fn handle_key_up(payload: &[u8]) -> Result<(), Box<dyn Error>>  {
-    println!("Key up: {:?}", payload);
+    if payload.len() < 10 {
+        return Err("KeyUp payload too short".into());
+    }
+
+    let scancode = u32::from_be_bytes(payload[0..4].try_into()?);
+
+    // ydotool key up: note ydotool defaults to key press, for key up you might need 'keyup' depending on setup
+    Command::new("ydotool")
+        .arg("keyup")
+        .arg(scancode.to_string())
+        .status()?;
+
+    Ok(())
 
     Ok(())
 }

@@ -7,6 +7,7 @@ use std::{
     sync::{ Arc, mpsc },
     time::{ Instant, Duration },
     env,
+    convert::TryInto,
 };
 use rustls::{
     ClientConfig,
@@ -16,7 +17,7 @@ use rustls::{
  };
 use winit::{
     event_loop::{ EventLoopBuilder, ControlFlow, EventLoopProxy },
-    event::{ Event, WindowEvent },
+    event::{ Event, WindowEvent, KeyboardInput, ElementState, VirtualKeyCode, ModifiersState },
     window::WindowBuilder,
  };
 use pixels::{ SurfaceTexture, Pixels, PixelsBuilder, wgpu, };
@@ -35,6 +36,49 @@ pub enum UserEvent {
 pub enum FrameUpdate {
     Full{ w: u32, h: u32, bytes: Vec<u8> },
     Delta(Vec<u8>),
+}
+
+// modifiers bitfield
+fn modifiers_to_bits(mods: ModifiersState) -> u32 {
+    let mut b = 0u32;
+    if mods.shift() { b |= 1 << 0; }
+    if mods.ctrl()  { b |= 1 << 1; }
+    if mods.alt()   { b |= 1 << 2; }
+    if mods.logo()  { b |= 1 << 3; } // Command / Super
+    b
+}
+
+// pack KeyDown/KeyUp with a small vk_name string
+fn make_key_packet(down: bool, scancode: u32, vk_name: Option<&str>, mods: ModifiersState) -> Vec<u8> {
+    let msg_type = if down { MessageType::KeyDown } else { MessageType::KeyUp };
+    let vk_bytes = vk_name.unwrap_or("").as_bytes();
+    let vk_len = vk_bytes.len() as u16;
+
+    let payload_len = 4 + 4 + 2 + vk_len as usize; // scancode + modifiers + vk_len + vk_bytes
+    let mut packet = Vec::with_capacity(1 + 4 + payload_len);
+    packet.push(msg_type.to_u8());
+    packet.extend_from_slice(&(payload_len as u32).to_be_bytes());
+    packet.extend_from_slice(&scancode.to_be_bytes());
+    packet.extend_from_slice(&modifiers_to_bits(mods).to_be_bytes());
+    packet.extend_from_slice(&vk_len.to_be_bytes());
+    if vk_len > 0 {
+        packet.extend_from_slice(vk_bytes);
+    }
+    packet
+}
+
+// text packet (ReceivedCharacter)
+fn make_text_packet(s: &str) -> Vec<u8> {
+    let bytes = s.as_bytes();
+    let mut packet = Vec::with_capacity(1 + 4 + bytes.len());
+    //1 byte
+    packet.push(MessageType::Text.to_u8());
+    //4 bytes
+    packet.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+    //len of bytes
+    packet.extend_from_slice(bytes);
+
+    packet
 }
 
 fn make_mouse_move_packet(x: u32, y: u32) -> Vec<u8> {
@@ -109,7 +153,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
 
     //create the transmitter and reciever for the mpsc channel(message queue) that carries messages of the type FrameUpdate
     let (frame_transmitter, frame_receiver) = mpsc::channel::<FrameUpdate>();
-    let (mouse_transmitter, mouse_receiver) = mpsc::channel::<Vec<u8>>();
+    let (input_transmitter, input_receiver) = mpsc::channel::<Vec<u8>>();
 
     //create thread for dispatcher
     std::thread::spawn(move || {
@@ -140,7 +184,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
         //create a TLS stream
         let mut tls = Stream::new(&mut tls_connection, &mut tcp);
 
-        if let Err(e) = dispatcher(&mut tls, frame_transmitter, proxy, mouse_receiver) {
+        if let Err(e) = dispatcher(&mut tls, frame_transmitter, proxy, input_receiver) {
             eprintln!("Dispatcher error: {e}");
         }
     });
@@ -180,6 +224,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     //used for FPS calculation
     let mut last_frame = Instant::now();
     let mut frame_count = 0u32;
+    let mut current_mods = ModifiersState::default();
 
     //run eventloop to correctly handle everything
     event_loop.run(move |event, _, control_flow| {
@@ -254,7 +299,7 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     //builds proper mouse packet to be sent to dispatcher
                     let packet = make_mouse_move_packet(sx, sy);
                     //sends to dispatcher
-                    let _ = mouse_transmitter.send(packet);
+                    let _ = input_transmitter.send(packet);
                 },
                 WindowEvent::Resized(size) => {
                     //if size actually changed resize the surface and the pixels buffer then redraw the window
@@ -271,7 +316,26 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                         //pixels.resize_buffer(new_inner_size.width, new_inner_size.height).unwrap();
                         window.request_redraw();
                     }
-                }
+                },
+                WindowEvent::ModifiersChanged(mods) => {
+                    current_mods = mods;
+                },
+                WindowEvent::KeyboardInput { input: KeyboardInput { scancode, virtual_keycode, state, .. }, .. } => {
+                    let down = state == ElementState::Pressed;
+                    let vk_name_opt = virtual_keycode.map(|vk| format!("{:?}", vk));
+                    if let Some(vk_string) = vk_name_opt {
+                        let packet = make_key_packet(down, scancode as u32, Some(&vk_string), current_mods);
+                        let _ = input_transmitter.send(packet);
+                    } else {
+                        let packet = make_key_packet(down, scancode as u32, None, current_mods);
+                        let _ = input_transmitter.send(packet);
+                    }
+               },
+               WindowEvent::ReceivedCharacter(ch) => {
+                let s = ch.to_string();
+                let packet = make_text_packet(&s);
+                let _ = input_transmitter.send(packet);
+               },
                 _ => {}
             },
             _ => {}
@@ -279,14 +343,14 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
     });
 }
 
-fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>, mouse_receiver: mpsc::Receiver<Vec<u8>>) -> Result<(), Box<dyn Error>> {
+fn dispatcher<T: Read + Write>(tls: &mut T, frame_transmitter: mpsc::Sender<FrameUpdate>, proxy: EventLoopProxy<UserEvent>, input_receiver: mpsc::Receiver<Vec<u8>>) -> Result<(), Box<dyn Error>> {
     //create h264 decoder and buffer for frame
     let mut decoder = Decoder::new().unwrap();
     let mut h264_buffer: Vec<u8> = Vec::new();
 
     loop {
         //send outgoing mouse packets
-        while let Ok(packet) = mouse_receiver.try_recv() {
+        while let Ok(packet) = input_receiver.try_recv() {
             tls.write_all(&packet)?;
         }
 
