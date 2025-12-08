@@ -48,22 +48,17 @@ fn modifiers_to_bits(mods: ModifiersState) -> u32 {
     b
 }
 
-// pack KeyDown/KeyUp with a small vk_name string
-fn make_key_packet(down: bool, scancode: u32, vk_name: Option<&str>, mods: ModifiersState) -> Vec<u8> {
+fn make_key_packet(down: bool, vk_code: Option<u32>, mods: ModifiersState) -> Vec<u8> {
     let msg_type = if down { MessageType::KeyDown } else { MessageType::KeyUp };
-    let vk_bytes = vk_name.unwrap_or("").as_bytes();
-    let vk_len = vk_bytes.len() as u16;
+    let vk_code_val = vk_code.unwrap_or(0);
 
-    let payload_len = 4 + 4 + 2 + vk_len as usize; // scancode + modifiers + vk_len + vk_bytes
+    let payload_len = 8 // virtual key(4 bytes) + modifiers(4 bytes)
     let mut packet = Vec::with_capacity(1 + 4 + payload_len);
     packet.push(msg_type.to_u8());
     packet.extend_from_slice(&(payload_len as u32).to_be_bytes());
-    packet.extend_from_slice(&scancode.to_be_bytes());
     packet.extend_from_slice(&modifiers_to_bits(mods).to_be_bytes());
-    packet.extend_from_slice(&vk_len.to_be_bytes());
-    if vk_len > 0 {
-        packet.extend_from_slice(vk_bytes);
-    }
+    packet.extend_from_slice(&vk_code_val.to_be_bytes());
+
     packet
 }
 
@@ -320,21 +315,12 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                 WindowEvent::ModifiersChanged(mods) => {
                     current_mods = mods;
                 },
-                WindowEvent::KeyboardInput { input: KeyboardInput { scancode, virtual_keycode, state, .. }, .. } => {
+                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode, state, .. }, .. } => {
+                    //key pressed-> down = true; key not pressed down = false
                     let down = state == ElementState::Pressed;
-                    let vk_name_opt = virtual_keycode.map(|vk| format!("{:?}", vk));
-                    if let Some(vk_string) = vk_name_opt {
-                        let packet = make_key_packet(down, scancode as u32, Some(&vk_string), current_mods);
-                        let _ = input_transmitter.send(packet);
-                    } else {
-                        let packet = make_key_packet(down, scancode as u32, None, current_mods);
-                        let _ = input_transmitter.send(packet);
-                    }
-               },
-               WindowEvent::ReceivedCharacter(ch) => {
-                let s = ch.to_string();
-                let packet = make_text_packet(&s);
-                let _ = input_transmitter.send(packet);
+                    //turn the virtual keycode into a u32
+                    let vk_code_opt = virtual_keycode.map(|vk| vk as u32);
+                    let packet = make_key_packet(down, vk_code_opt, current_mods);
                },
                 _ => {}
             },
