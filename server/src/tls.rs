@@ -6,7 +6,6 @@ use std::error::Error;
 
 pub fn load_server_config() -> Result<Arc<ServerConfig>, Box<dyn Error>> {
     //get cert and key
-    let local_cert_file = &mut BufReader::new(File::open("../certs/server.crt")?);
     let cert_file = &mut BufReader::new(File::open("../certs/server.crt")?);
     let key_file = &mut BufReader::new(File::open("../certs/server.key")?);
 

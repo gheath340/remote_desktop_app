@@ -5,20 +5,12 @@ use std::{
     env,
     net::{ TcpListener, TcpStream, },
     time::{ Instant, Duration },
-    thread,
     sync::{ mpsc, },
 };
 use rustls::{
     ServerConfig,
     ServerConnection,
-    Stream,
     StreamOwned
-};
-use turbojpeg::{ Compressor,
-    Image,
-    PixelFormat,
-    Subsamp,
-    OutputBuf,
 };
 use common::message_type::MessageType;
 use crate::message_type_handlers;
@@ -27,7 +19,6 @@ use openh264::{
     encoder::{ Encoder, EncoderConfig, RateControlMode },
     formats::YUVBuffer,
 };
-use std::sync::mpsc::RecvTimeoutError;
 
 
 #[inline]
@@ -170,6 +161,38 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
         }
     });
 
+    fn handle_incoming_message(msg_type: MessageType, payload: &[u8]) -> Result<(), Box<dyn Error>> {
+        match msg_type {
+            MessageType::Text => message_type_handlers::handle_text(payload)?,
+            MessageType::Connect => message_type_handlers::handle_connect(payload)?,
+            MessageType::Disconnect => message_type_handlers::handle_disconnect(payload)?,
+            MessageType::Error => message_type_handlers::handle_error(payload)?,
+
+            MessageType::CursorShape => message_type_handlers::handle_cursor_shape(payload)?,
+            MessageType::CursorPos => message_type_handlers::handle_cursor_pos(payload)?,
+            MessageType::Resize => message_type_handlers::handle_resize(payload)?,
+
+            MessageType::KeyDown => message_type_handlers::handle_key_down(payload)?,
+            MessageType::KeyUp => message_type_handlers::handle_key_up(payload)?,
+            MessageType::MouseMove => message_type_handlers::handle_mouse_move(payload)?,
+            MessageType::MouseDown => message_type_handlers::handle_mouse_down(payload)?,
+            MessageType::MouseUp => message_type_handlers::handle_mouse_up(payload)?,
+            MessageType::MouseScroll => message_type_handlers::handle_mouse_scroll(payload)?,
+
+            MessageType::Clipboard => message_type_handlers::handle_clipboard(payload)?,
+
+            MessageType::FrameFull => {}
+            MessageType::FrameDelta => {}
+            MessageType::FrameEnd => {}
+
+            MessageType::Unknown(code) => {
+                println!("Unknown message type: {code:#X}, skipping {} bytes", payload.len());
+            }
+        }
+
+        Ok(())
+    }
+
     //new dispatcher thread
     std::thread::spawn(move || {
     // this thread owns the TLS stream
@@ -194,10 +217,6 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     // convert the downscaled RGBA to RGB
     rgba_to_rgb_inplace(&mut rgb_buf[0..width*height*3], &down_rgba[0..width*height*4]);
 
-    //set current encoder dimensions
-    let mut current_enc_w = width;
-    let mut current_enc_h = height;
-
     //set h.264 encoder configuration then build encoder with that config
     let enc_cfg = EncoderConfig::new(width as u32, height as u32)
         .max_frame_rate(30.0)
@@ -217,10 +236,7 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
     frame_transmitter.send((MessageType::FrameDelta, encoded_bytes))?;
     frame_transmitter.send((MessageType::FrameEnd, Vec::new()))?;
 
-    //initialize prev_frame with the first frame
-    let mut prev_frame = first_rgba;
-
-    let mut last_sent = Instant::now();
+    let last_sent = Instant::now();
     let target_frame_time = Duration::from_millis(33); // ~30 fps
 
     loop {
@@ -268,38 +284,6 @@ pub fn run(tls_config: Arc<ServerConfig>) -> Result<(), Box<dyn Error>> {
     for stream in listener.incoming() {
         handle_client(stream?, tls_config.clone())?;
     }
-    Ok(())
-}
-
-fn handle_incoming_message(msg_type: MessageType, payload: &[u8]) -> Result<(), Box<dyn Error>> {
-    match msg_type {
-        MessageType::Text => message_type_handlers::handle_text(payload)?,
-        MessageType::Connect => message_type_handlers::handle_connect(payload)?,
-        MessageType::Disconnect => message_type_handlers::handle_disconnect(payload)?,
-        MessageType::Error => message_type_handlers::handle_error(payload)?,
-
-        MessageType::CursorShape => message_type_handlers::handle_cursor_shape(payload)?,
-        MessageType::CursorPos => message_type_handlers::handle_cursor_pos(payload)?,
-        MessageType::Resize => message_type_handlers::handle_resize(payload)?,
-
-        MessageType::KeyDown => message_type_handlers::handle_key_down(payload)?,
-        MessageType::KeyUp => message_type_handlers::handle_key_up(payload)?,
-        MessageType::MouseMove => message_type_handlers::handle_mouse_move(payload)?,
-        MessageType::MouseDown => message_type_handlers::handle_mouse_down(payload)?,
-        MessageType::MouseUp => message_type_handlers::handle_mouse_up(payload)?,
-        MessageType::MouseScroll => message_type_handlers::handle_mouse_scroll(payload)?,
-
-        MessageType::Clipboard => message_type_handlers::handle_clipboard(payload)?,
-
-        MessageType::FrameFull => {}
-        MessageType::FrameDelta => {}
-        MessageType::FrameEnd => {}
-
-        MessageType::Unknown(code) => {
-            println!("Unknown message type: {code:#X}, skipping {} bytes", payload.len());
-        }
-    }
-
     Ok(())
 }
 
@@ -368,13 +352,11 @@ pub fn send_response<T: Write>(stream: &mut T, msg_type: MessageType, payload: &
     //keeps retrying until all bytes are written
     let mut write_all_retry = |data: &[u8]| -> Result<(), Box<dyn std::error::Error>> {
         let mut offset = 0;
-        let mut retries = 0;
         while offset < data.len() {
             match stream.write(&data[offset..]) {
                 Ok(0) => return Err("Socket closed while writing".into()),
                 Ok(n) => offset += n,
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    retries += 1;
                     std::thread::sleep(Duration::from_millis(1));
                     continue;
                 }

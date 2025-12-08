@@ -7,7 +7,6 @@ use std::{
     sync::{ Arc, mpsc },
     time::{ Instant, Duration },
     env,
-    convert::TryInto,
 };
 use rustls::{
     ClientConfig,
@@ -17,12 +16,11 @@ use rustls::{
  };
 use winit::{
     event_loop::{ EventLoopBuilder, ControlFlow, EventLoopProxy },
-    event::{ Event, WindowEvent, KeyboardInput, ElementState, VirtualKeyCode, ModifiersState },
+    event::{ Event, WindowEvent, KeyboardInput, ElementState, ModifiersState },
     window::WindowBuilder,
  };
-use pixels::{ SurfaceTexture, Pixels, PixelsBuilder, wgpu, };
+use pixels::{ SurfaceTexture, Pixels, };
 use crate::{ message_type_handlers, };
-use lz4_flex::decompress_size_prepended;
 use openh264::decoder::Decoder;
 use openh264::formats::YUVSource;
 
@@ -52,26 +50,12 @@ fn make_key_packet(down: bool, vk_code: Option<u32>, mods: ModifiersState) -> Ve
     let msg_type = if down { MessageType::KeyDown } else { MessageType::KeyUp };
     let vk_code_val = vk_code.unwrap_or(0);
 
-    let payload_len = 8 // virtual key(4 bytes) + modifiers(4 bytes)
+    let payload_len = 8; // virtual key(4 bytes) + modifiers(4 bytes)
     let mut packet = Vec::with_capacity(1 + 4 + payload_len);
     packet.push(msg_type.to_u8());
     packet.extend_from_slice(&(payload_len as u32).to_be_bytes());
     packet.extend_from_slice(&modifiers_to_bits(mods).to_be_bytes());
     packet.extend_from_slice(&vk_code_val.to_be_bytes());
-
-    packet
-}
-
-// text packet (ReceivedCharacter)
-fn make_text_packet(s: &str) -> Vec<u8> {
-    let bytes = s.as_bytes();
-    let mut packet = Vec::with_capacity(1 + 4 + bytes.len());
-    //1 byte
-    packet.push(MessageType::Text.to_u8());
-    //4 bytes
-    packet.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
-    //len of bytes
-    packet.extend_from_slice(bytes);
 
     packet
 }
@@ -99,7 +83,6 @@ fn yuv420p_to_rgba_with_stride(
 ) -> Vec<u8> {
     let mut out = vec![0u8; w * h * 4];
     let cw = (w + 1) / 2;
-    let ch = (h + 1) / 2;
 
     for j in 0..h {
         let y_row = &y[j * y_stride .. j * y_stride + w];
@@ -130,12 +113,9 @@ fn yuv420p_to_rgba_with_stride(
 }
 
 //to run on local host SERVER_ADDR=127.0.0.1:7878 cargo run --release -p client
-//to run on vm at home comment out other _address vars  and change connection_address to vm_work_address.clone()
-//to run on vm at work comment out other _address vars  and change connection_address to vm_work_address.clone()
-//to run on desktop comment out other _address vars and change connection_address to home_desktop_address.clone()
 pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
-    let home_desktop_address = "192.168.50.105:7878".to_string();
-    let vm_home_address = "192.168.50.209:7878".to_string();
+    //let home_desktop_address = "192.168.50.105:7878".to_string();
+    //let vm_home_address = "192.168.50.209:7878".to_string();
     let vm_work_address = "10.176.3.96:7878".to_string();
     //allow for server address override by calling "SERVER_ADDR=<address> cargo run -p client"
     let connection_address = env::var("SERVER_ADDR").unwrap_or(vm_work_address.clone());
@@ -321,6 +301,8 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                     //turn the virtual keycode into a u32
                     let vk_code_opt = virtual_keycode.map(|vk| vk as u32);
                     let packet = make_key_packet(down, vk_code_opt, current_mods);
+
+                    let _ = input_transmitter.send(packet);
                },
                 _ => {}
             },
