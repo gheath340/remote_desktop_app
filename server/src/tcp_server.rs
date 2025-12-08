@@ -172,8 +172,8 @@ fn handle_client(mut tcp: TcpStream, tls_config: Arc<ServerConfig>) -> Result<()
             MessageType::CursorPos => message_type_handlers::handle_cursor_pos(payload)?,
             MessageType::Resize => message_type_handlers::handle_resize(payload)?,
 
-            MessageType::KeyDown => message_type_handlers::handle_key_down(payload)?,
-            MessageType::KeyUp => message_type_handlers::handle_key_up(payload)?,
+            MessageType::KeyDown | MessageType::KeyUp => message_type_handlers::handle_key(msg_type, payload)?,
+            //MessageType::KeyUp => message_type_handlers::handle_key_up(payload)?,
             MessageType::MouseMove => message_type_handlers::handle_mouse_move(payload)?,
             MessageType::MouseDown => message_type_handlers::handle_mouse_down(payload)?,
             MessageType::MouseUp => message_type_handlers::handle_mouse_up(payload)?,

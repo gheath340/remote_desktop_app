@@ -43,19 +43,20 @@ fn modifiers_to_bits(mods: ModifiersState) -> u32 {
     if mods.ctrl()  { b |= 1 << 1; }
     if mods.alt()   { b |= 1 << 2; }
     if mods.logo()  { b |= 1 << 3; } // Command / Super
+    
     b
 }
 
-fn make_key_packet(down: bool, vk_code: Option<u32>, mods: ModifiersState) -> Vec<u8> {
+fn make_key_packet(down: bool, scancode: Option<u32>, mods: ModifiersState) -> Vec<u8> {
     let msg_type = if down { MessageType::KeyDown } else { MessageType::KeyUp };
-    let vk_code_val = vk_code.unwrap_or(0);
+    let scancode_val = scancode.unwrap_or(0);
 
     let payload_len = 8; // virtual key(4 bytes) + modifiers(4 bytes)
     let mut packet = Vec::with_capacity(1 + 4 + payload_len);
     packet.push(msg_type.to_u8());
     packet.extend_from_slice(&(payload_len as u32).to_be_bytes());
     packet.extend_from_slice(&modifiers_to_bits(mods).to_be_bytes());
-    packet.extend_from_slice(&vk_code_val.to_be_bytes());
+    packet.extend_from_slice(&scancode_val.to_be_bytes());
 
     packet
 }
@@ -295,12 +296,13 @@ pub fn run(tls_config: Arc<ClientConfig>) -> Result<(), Box<dyn Error>> {
                 WindowEvent::ModifiersChanged(mods) => {
                     current_mods = mods;
                 },
-                WindowEvent::KeyboardInput { input: KeyboardInput { virtual_keycode, state, .. }, .. } => {
+                WindowEvent::KeyboardInput { input: KeyboardInput { scancode, state, .. }, .. } => {
                     //key pressed-> down = true; key not pressed down = false
                     let down = state == ElementState::Pressed;
                     //turn the virtual keycode into a u32
-                    let vk_code_opt = virtual_keycode.map(|vk| vk as u32);
-                    let packet = make_key_packet(down, vk_code_opt, current_mods);
+                    // let vk_code_opt = virtual_keycode.map(|vk| vk as u32);
+                    // let packet = make_key_packet(down, vk_code_opt, current_mods);
+                    let packet = make_key_packet(down, Some(scancode as u32), current_mods);
 
                     let _ = input_transmitter.send(packet);
                },
